@@ -2,13 +2,13 @@
 # $ conda create --name <env> --file <this file>
 
 pytorch=2.0.1
-numpy=1.25.2=py310h3b2db8e_0
-pandas=2.0.3=py310h46d7db6_0
-pillow=9.4.0=py310h313beb8_0
-pip=23.2.1=py310hca03da5_0
-python=3.10.12=hb885b13_0
+numpy=1.25.2
+pandas=2.0.3
+pillow=9.4.0
+pip=23.2.1
+python=3.10.12
 jupyter=1.0.0
-networkx=3.1=py310hca03da5_0
+networkx=3.1
 qtpy=2.2.0
 torchaudio=2.0.2
 torchvision=0.15.2
