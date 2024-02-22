@@ -6,8 +6,7 @@ class PlasticEdges(torch.nn.Module):
     def __init__(self, num_nodes, spatial1, spatial2, kernel_size, channels, device='cpu',
                  normalize_conv=True, mask=None, optimize_weights=True, debug=False, **kwargs):
         """
-        serves the same purpose as the standard reverb convolution, but designed to operate on a graph all at once.
-
+        designed to operate on a graph all at once.
         """
         super().__init__()
         self.activation_memory = None
