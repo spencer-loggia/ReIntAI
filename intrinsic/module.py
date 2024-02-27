@@ -1,5 +1,5 @@
 import torch
-import util
+from intrinsic import util
 
 
 class PlasticEdges(torch.nn.Module):
@@ -9,22 +9,25 @@ class PlasticEdges(torch.nn.Module):
         designed to operate on a graph all at once.
         """
         super().__init__()
+        # The activation memory tracks the last state of the model. It is necessary for for computing the instrisic edge
+        # update function
         self.activation_memory = None
         self.num_nodes = num_nodes
         self.kernel_size, self.pad = util.conv_identity_params(in_spatial=spatial1, desired_kernel=kernel_size)
         self.channels = channels
         self.spatial1 = spatial1
         self.spatial2 = spatial2
+
+        # mask has shape (nodes, nodes) and allows us to predefine a graph structure besides fully connected.
         if mask is None:
             mask = torch.ones((num_nodes, num_nodes), device=device)
-            mask[:, 0] = 0
         self.mask = mask
 
         # Non-Parametric Weights used for intrinsic update
         init_weight = torch.empty((num_nodes, num_nodes,
-                                  1, 1,
-                                  channels, self.kernel_size, self.kernel_size),
-                                 device=device)  # 8D Tensor.
+                                   1, 1,
+                                   channels, self.kernel_size, self.kernel_size),
+                                  device=device)  # 8D Tensor.
         self.init_weight = torch.nn.Parameter(torch.nn.init.xavier_normal_(init_weight))
 
         self.weight = self._expand_base_weights(self.init_weight)
@@ -64,29 +67,33 @@ class PlasticEdges(torch.nn.Module):
         if (torch.max(x) > 1 or torch.min(x) < 0) and self.debug:
             print("WARN: Reverb  input activations are expected to have range 0 to 1")
         xufld = self.unfolder(x).transpose(1, 2)  # nodes, spatial1 * spatial2, channels * kernel * kernel
-        xufld = xufld.view((1, self.num_nodes, self.spatial1 * self.spatial2, self.channels, self.kernel_size ** 2))
+        xufld = xufld.view((self.num_nodes, 1, self.spatial1 * self.spatial2, self.channels, self.kernel_size ** 2))
         # unfolded states will broadcast over input node dim.
 
         self.activation_memory = xufld.clone()
 
         # weights are zeroed for node -> node maps that are masked.
         combined_weight = self.weight * self.mask.view(self.num_nodes, self.num_nodes, 1, 1, 1, 1, 1)
-        combined_weight = combined_weight.view((self.num_nodes, self.num_nodes, self.spatial1 * self.spatial2, self.channels,
-                                                self.kernel_size ** 2))
+        combined_weight = combined_weight.view(
+            (self.num_nodes, self.num_nodes, self.spatial1 * self.spatial2, self.channels,
+             self.kernel_size ** 2))
 
-        # weights are element wise multiplied by current unfolded system state
+        # weights are element wise multiplied by current unfolded system state broadcast across target node dimension.
         meta_state = combined_weight * xufld
         if self.debug:
-            meta_state.register_hook(lambda grad: print("pre_einsum", grad.reshape(grad.shape[0], grad.shape[1], -1).sum(dim=-1)))
+            meta_state.register_hook(
+                lambda grad: print("pre_einsum", grad.reshape(grad.shape[0], grad.shape[1], -1).sum(dim=-1)))
         # src_nodes (u), target_node (v), flat_spatial (s), channels (c), flat_kernel (k)
         # src_nodes (u), target_node (v), in_channels (c), out_channels (o)
-        iter_rule = "uvsck, uvco -> usok"
+        # this einsum will refold, sum across source node dimension, and map channels in parallel.
+        iter_rule = "uvsck, uvco -> vsok"
         mapped_meta = torch.einsum(iter_rule, meta_state, self.chan_map)
         if self.debug:
             mapped_meta.register_hook(lambda grad: print("post_einsum", grad.reshape(grad.shape[0], -1).sum(dim=-1)))
 
-        #ufld_meta = torch.sum(mapped_meta, dim=0)  # sum over input nodes
-        ufld_meta = mapped_meta.transpose(2, 3)  # switch the ordering of kernels and channels to original so we can take the correct view on them
+        # ufld_meta = torch.sum(mapped_meta, dim=0)  # sum over input nodes
+        ufld_meta = mapped_meta.transpose(2,
+                                          3)  # switch the ordering of kernels and channels to original so we can take the correct view on them
         ufld_meta = ufld_meta.reshape(
             (self.num_nodes, self.spatial1 * self.spatial2, self.kernel_size ** 2 * self.channels)
         ).transpose(1, 2)  # finish returning to original unfolded dims
@@ -121,14 +128,18 @@ class PlasticEdges(torch.nn.Module):
         # reverse the channel mapping so source channels receive information about their targets
         target_activations = target_activation.view(1, self.num_nodes, self.channels,
                                                     self.spatial1 * self.spatial2).transpose(2, 3)
-        reverse_conv = self.chan_map.clone().transpose(2, 3)  # (node, node, in_chan, out_chan)
 
+        # TODO:: This should be refactored to use torch.linalg.lstsq for better performance.
+        reverse_conv = torch.linalg.pinv(self.chan_map.view((self.num_nodes, self.num_nodes, self.channels, self.channels)))
+
+        # reverse_conv = self.chan_map.clone().transpose(2, 3)  # (node, node, in_chan, out_chan)
         iter_rule = "uvsc, uvoc -> uvsc"
         target_meta_activations = torch.einsum(iter_rule, target_activations, reverse_conv).transpose(2,
                                                                                                       3)  # source, target, channels, spatial
         target_meta_activations = target_meta_activations.view(self.num_nodes * self.num_nodes, self.channels,
                                                                self.spatial1, self.spatial2)
-        ufld_target = self.unfolder(target_meta_activations).transpose(1, 2)  # nodes * nodes, spatial1 * spatial2, channels * kernel * kernel
+        ufld_target = self.unfolder(target_meta_activations).transpose(1,
+                                                                       2)  # nodes * nodes, spatial1 * spatial2, channels * kernel * kernel
         ufld_target = ufld_target.view((self.num_nodes, self.num_nodes, self.spatial1 * self.spatial2, self.channels,
                                         self.kernel_size * self.kernel_size))
 
