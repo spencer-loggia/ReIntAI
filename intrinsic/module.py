@@ -26,8 +26,8 @@ class PlasticEdges(torch.nn.Module):
         # Non-Parametric Weights used for intrinsic update
         init_weight = torch.empty((num_nodes, num_nodes,
                                    1, 1,
-                                   channels, self.kernel_size, self.kernel_size),
-                                  device=device)  # 8D Tensor.
+                                   channels, channels, self.kernel_size, self.kernel_size),
+                                   device=device)  # 8D Tensor.
         self.init_weight = torch.nn.Parameter(torch.nn.init.xavier_normal_(init_weight))
 
         self.weight = self._expand_base_weights(self.init_weight)
@@ -51,7 +51,7 @@ class PlasticEdges(torch.nn.Module):
 
     def _expand_base_weights(self, in_weight):
         # adds explicit spatial dims to weights
-        expanded_weights = torch.tile(in_weight.clone(), (1, 1, self.spatial1, self.spatial2, 1, 1, 1))
+        expanded_weights = torch.tile(in_weight.clone(), (1, 1, self.spatial1, self.spatial2, 1, 1, 1, 1))
         return expanded_weights
 
     def parameters(self):
@@ -73,30 +73,28 @@ class PlasticEdges(torch.nn.Module):
         self.activation_memory = xufld.clone()
 
         # weights are zeroed for node -> node maps that are masked.
-        combined_weight = self.weight * self.mask.view(self.num_nodes, self.num_nodes, 1, 1, 1, 1, 1)
+        combined_weight = self.weight * self.mask.view(self.num_nodes, self.num_nodes, 1, 1, 1, 1, 1, 1)
         combined_weight = combined_weight.view(
-            (self.num_nodes, self.num_nodes, self.spatial1 * self.spatial2, self.channels,
+            (self.num_nodes, self.num_nodes, self.spatial1 * self.spatial2, self.channels, self.channels,
              self.kernel_size ** 2))
 
-        # weights are element wise multiplied by current unfolded system state broadcast across target node dimension.
-        meta_state = combined_weight * xufld
-        if self.debug:
-            meta_state.register_hook(
-                lambda grad: print("pre_einsum", grad.reshape(grad.shape[0], grad.shape[1], -1).sum(dim=-1)))
+        # Compose plastic weights and channel map
+        combined_weight = combined_weight * self.chan_map.view((self.num_nodes, self.num_nodes, 1, self.channels, self.channels, 1))
+
         # src_nodes (u), target_node (v), flat_spatial (s), channels (c), flat_kernel (k)
-        # src_nodes (u), target_node (v), in_channels (c), out_channels (o)
-        # this einsum will refold, sum across source node dimension, and map channels in parallel.
-        iter_rule = "uvsck, uvco -> vsok"
-        mapped_meta = torch.einsum(iter_rule, meta_state, self.chan_map)
+        # src_nodes (u), target_node (v), flat_spatial (s), in_channels (c), out_channels (o), flat_kernel (k)
+        # this einsum will sum across source node dimension and map channels in parallel.
+        iter_rule = "uvsck, uvscok -> vsok"
+        mapped_meta = torch.einsum(iter_rule, xufld, combined_weight)
         if self.debug:
             mapped_meta.register_hook(lambda grad: print("post_einsum", grad.reshape(grad.shape[0], -1).sum(dim=-1)))
 
-        # ufld_meta = torch.sum(mapped_meta, dim=0)  # sum over input nodes
-        ufld_meta = mapped_meta.transpose(2,
-                                          3)  # switch the ordering of kernels and channels to original so we can take the correct view on them
+        ufld_meta = mapped_meta.transpose(2,3)  # switch the ordering of kernels and channels to original so we can take the correct view on them
         ufld_meta = ufld_meta.reshape(
             (self.num_nodes, self.spatial1 * self.spatial2, self.kernel_size ** 2 * self.channels)
-        ).transpose(1, 2)  # finish returning to original unfolded dims
+        ).transpose(1, 2)  # finish returning to original unfolded
+
+        # fold up to state space (sum unit receptive fields)
         out = self.folder(ufld_meta)  # nodes, channels, spatial, spatial
         if self.debug:
             out.register_hook(lambda grad: print("out", grad.reshape(grad.shape[0], -1).sum(dim=-1)))
@@ -127,7 +125,7 @@ class PlasticEdges(torch.nn.Module):
 
         # reverse the channel mapping so source channels receive information about their targets
         target_activations = target_activation.view(1, self.num_nodes, self.channels,
-                                                    self.spatial1 * self.spatial2).transpose(2, 3)
+                                                    self.spatial1 * self.spatial2).transpose(2, 3) # (_, n, s, c)
 
         # TODO:: This should be refactored to use torch.linalg.lstsq for better performance.
         reverse_conv = torch.linalg.pinv(self.chan_map.view((self.num_nodes, self.num_nodes, self.channels, self.channels)))

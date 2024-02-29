@@ -1,9 +1,9 @@
 import torch
 import numpy as np
-from module import PlasticEdges
+from intrinsic.module import PlasticEdges
 
 
-class ElegantReverbNetwork(torch.nn.Module):
+class Intrinsic(torch.nn.Module):
     """
     Parallelized model.
     """
