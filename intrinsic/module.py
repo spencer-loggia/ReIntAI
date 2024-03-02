@@ -79,7 +79,12 @@ class PlasticEdges(torch.nn.Module):
              self.kernel_size ** 2))
 
         # Compose plastic weights and channel map
-        combined_weight = combined_weight * self.chan_map.view((self.num_nodes, self.num_nodes, 1, self.channels, self.channels, 1))
+        # TODO: MAKE THIS A REAL MATRIX MULTIPLICATION
+
+        # uvscok,
+        # combined_weight = combined_weight * self.chan_map.view((self.num_nodes, self.num_nodes, 1, self.channels, self.channels, 1))
+        iterrule = "uvscok, vbop -> ubscpk"
+        combined_weight = torch.einsum(iterrule, combined_weight, self.chan_map)
 
         # src_nodes (u), target_node (v), flat_spatial (s), channels (c), flat_kernel (k)
         # src_nodes (u), target_node (v), flat_spatial (s), in_channels (c), out_channels (o), flat_kernel (k)
@@ -124,32 +129,35 @@ class PlasticEdges(torch.nn.Module):
         # channel_view = (self.kernel_size ** 2, self.in_channels, self.spatial1, self.spatial2)
 
         # reverse the channel mapping so source channels receive information about their targets
-        target_activations = target_activation.view(1, self.num_nodes, self.channels,
-                                                    self.spatial1 * self.spatial2).transpose(2, 3) # (_, n, s, c)
+        target_activations = target_activation.view(self.num_nodes * self.channels,
+                                                    self.spatial1 * self.spatial2, 1).transpose(0, 1)  # (_, s, nc)
 
-        # TODO:: This should be refactored to use torch.linalg.lstsq for better performance.
-        reverse_conv = torch.linalg.pinv(self.chan_map.view((self.num_nodes, self.num_nodes, self.channels, self.channels)))
+        chan_map = self.chan_map.permute((0, 2, 1, 3)).reshape((1, self.num_nodes * self.channels, self.num_nodes * self.channels))
 
-        # reverse_conv = self.chan_map.clone().transpose(2, 3)  # (node, node, in_chan, out_chan)
-        iter_rule = "uvsc, uvoc -> uvsc"
-        target_meta_activations = torch.einsum(iter_rule, target_activations, reverse_conv).transpose(2,
-                                                                                                      3)  # source, target, channels, spatial
-        target_meta_activations = target_meta_activations.view(self.num_nodes * self.num_nodes, self.channels,
-                                                               self.spatial1, self.spatial2)
-        ufld_target = self.unfolder(target_meta_activations).transpose(1,
-                                                                       2)  # nodes * nodes, spatial1 * spatial2, channels * kernel * kernel
-        ufld_target = ufld_target.view((self.num_nodes, self.num_nodes, self.spatial1 * self.spatial2, self.channels,
-                                        self.kernel_size * self.kernel_size))
+        # This is a fast and  numerically stable equivalent to (reverse_conv ^ -1) (target_activations)
+        target_meta_activations = torch.sigmoid(torch.linalg.solve(chan_map, torch.logit(target_activations)))
 
-        coactivation = self.activation_memory * ufld_target  # [0, 1] -> [0, 1]
+        target_meta_activations = target_meta_activations.transpose(0, 1).reshape(self.num_nodes, self.channels, self.spatial1, self.spatial2) # u, c, s, s
 
-        plasticity = self.plasticity.view(self.num_nodes, self.num_nodes, 1, 1, 1, 1, 1).clone()
+        # unfold the current remapped activations
+        ufld_target = self.unfolder(target_meta_activations).transpose(1, 2) # nodes, spatial1 * spatial2, channels * kernel * kernel
+        ufld_target = ufld_target.view((self.num_nodes, self.spatial1**2, self.channels,
+                                        self.kernel_size**2))
+
+        activ_mem = self.activation_memory.view((self.num_nodes, self.spatial1**2, self.channels,
+                                                 self.kernel_size**2))
+
+        # This is an outer product on the channel dimension and elementwise on all others.
+        iterrule = "usck, vsok -> uvscok"
+        coactivation = torch.einsum(iterrule, activ_mem, ufld_target)
+
+        plasticity = self.plasticity.view(self.num_nodes, self.num_nodes, 1, 1, 1, 1, 1, 1).clone()
         if self.debug:
             plasticity.register_hook(lambda grad: print("plast", grad.reshape(grad.shape[0], -1).sum(dim=-1)))
         self.weight = (1 - plasticity) * self.weight + plasticity * coactivation.view((self.num_nodes, self.num_nodes,
                                                                                        self.spatial1, self.spatial2,
-                                                                                       self.channels, self.kernel_size,
-                                                                                       self.kernel_size))
+                                                                                       self.channels, self.channels,
+                                                                                       self.kernel_size, self.kernel_size))
         return
 
     def detach(self, reset_weight=False):
