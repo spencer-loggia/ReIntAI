@@ -60,6 +60,7 @@ class PlasticEdges(torch.nn.Module):
 
     def forward(self, x):
         x = x.to(self.device)  # nodes, channels, spatial1, spatial2
+        x = torch.sigmoid(x) # compute sigmoid activation on range [0, 1]
         if len(x.shape) != 4:
             raise ValueError("Input Tensor Must Be 4D, not shape", x.shape)
         if x.shape[0] != self.num_nodes:
@@ -79,8 +80,6 @@ class PlasticEdges(torch.nn.Module):
              self.kernel_size ** 2))
 
         # Compose plastic weights and channel map
-        # TODO: MAKE THIS A REAL MATRIX MULTIPLICATION
-
         # uvscok,
         # combined_weight = combined_weight * self.chan_map.view((self.num_nodes, self.num_nodes, 1, self.channels, self.channels, 1))
         iterrule = "uvscok, vbop -> ubscpk"
@@ -135,7 +134,7 @@ class PlasticEdges(torch.nn.Module):
         chan_map = self.chan_map.permute((0, 2, 1, 3)).reshape((1, self.num_nodes * self.channels, self.num_nodes * self.channels))
 
         # This is a fast and  numerically stable equivalent to (reverse_conv ^ -1) (target_activations)
-        target_meta_activations = torch.sigmoid(torch.linalg.solve(chan_map, torch.logit(target_activations)))
+        target_meta_activations = torch.sigmoid(torch.linalg.solve(chan_map, target_activations))
 
         target_meta_activations = target_meta_activations.transpose(0, 1).reshape(self.num_nodes, self.channels, self.spatial1, self.spatial2) # u, c, s, s
 
