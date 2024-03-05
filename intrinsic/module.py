@@ -9,7 +9,7 @@ class PlasticEdges(torch.nn.Module):
         designed to operate on a graph all at once.
         """
         super().__init__()
-        # The activation memory tracks the last state of the model. It is necessary for for computing the instrisic edge
+        # The activation memory tracks the last state of the model. It is necessary for computing the instrisic edge
         # update function
         self.activation_memory = None
         self.num_nodes = num_nodes
@@ -110,9 +110,8 @@ class PlasticEdges(torch.nn.Module):
     def update(self, target_activation):
         """
         intrinsic update
-        :param target_activation: the activation of each state after forward pass. (nodes, channel, spatial, spatial)
-        :param args:
-        :return:
+        :param target_activation: the value of each state after forward pass before activation (nodes, channel, spatial, spatial)
+        :return: None
         """
 
         if len(target_activation.shape) != 4:
@@ -135,7 +134,6 @@ class PlasticEdges(torch.nn.Module):
 
         # This is a fast and  numerically stable equivalent to (reverse_conv ^ -1) (target_activations)
         target_meta_activations = torch.sigmoid(torch.linalg.solve(chan_map, target_activations))
-
         target_meta_activations = target_meta_activations.transpose(0, 1).reshape(self.num_nodes, self.channels, self.spatial1, self.spatial2) # u, c, s, s
 
         # unfold the current remapped activations
