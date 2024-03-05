@@ -146,15 +146,16 @@ class PlasticEdges(torch.nn.Module):
 
         # This is an outer product on the channel dimension and elementwise on all others.
         iterrule = "usck, vsok -> uvscok"
-        coactivation = torch.einsum(iterrule, activ_mem, ufld_target)
-
+        coactivation = torch.exp(torch.einsum(iterrule, activ_mem, ufld_target))
         plasticity = self.plasticity.view(self.num_nodes, self.num_nodes, 1, 1, 1, 1, 1, 1).clone()
+
         if self.debug:
             plasticity.register_hook(lambda grad: print("plast", grad.reshape(grad.shape[0], -1).sum(dim=-1)))
-        self.weight = (1 - plasticity) * self.weight + plasticity * coactivation.view((self.num_nodes, self.num_nodes,
-                                                                                       self.spatial1, self.spatial2,
-                                                                                       self.channels, self.channels,
-                                                                                       self.kernel_size, self.kernel_size))
+        self.weight = torch.log((1 - plasticity) * torch.exp(self.weight) +
+                                plasticity * coactivation.view((self.num_nodes, self.num_nodes,
+                                                                self.spatial1, self.spatial2,
+                                                                self.channels, self.channels,
+                                                                self.kernel_size, self.kernel_size)))
         return
 
     def detach(self, reset_weight=False):
