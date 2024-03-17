@@ -16,27 +16,40 @@ class WaterworldAgent(torch.nn.Module):
         """
         super().__init__(*args, **kwargs)
         self.spatial = spatial
+        self.action_dim = action_dim
         self.channels = channels
         self.input_size = sensors * 5 + 2
         self.core_model = Intrinsic(num_nodes, node_shape=(1, channels, spatial, spatial), kernel_size=kernel)
+
+        # transform inputs to core model space
         input_encoder = torch.empty((self.input_size, self.spatial * self.spatial * self.channels))
         self.input_encoder = torch.nn.Parameter(torch.nn.init.xavier_normal_(input_encoder))
 
-        action_decoder = torch.empty(self.spatial ** 2, action_dim)
-        self.action_decoder = torch.nn.Parameter(torch.nn.init.xavier_normal_(action_decoder))
+        # produce logits for mean and covariance of policy distribution
+        cov_dim = int(action_dim * (action_dim + 1) / 2)
+        policy_decoder = torch.empty(self.spatial ** 2, action_dim + cov_dim)
+        self.policy_decoder = torch.nn.Parameter(torch.nn.init.xavier_normal_(policy_decoder))
+
+        # produce critic state value estimates
+        value_decoder = torch.empty(self.spatial ** 2, 1)
+        self.value_decoder = torch.nn.Parameter(torch.nn.init.xavier_normal_(value_decoder))
 
     def forward(self, X):
         """
         :param X: Agent Sensor Data
-        :return:
+        :return: Mu, Sigma, Value - the mean and variance of the action distribution, and the state value estimate
         """
+        # create a state matrix for injection into core from input observation
         with torch.no_grad():
             encoded_input = (X @ self.input_encoder).view(self.channels, self.spatial, self.spatial)
             in_states = torch.zeros_like(self.core_model.states)
             in_states[0, :, :, :] += encoded_input
+        # run a model time step
         out_states = self.core_model(in_states)
-        action = out_states[2, 0, :, :].flatten() @ self.action_decoder
-        return action
+        # compute next action and value estimates
+        action = out_states[2, 0, :, :].flatten() @ self.policy_decoder
+        value_est = out_states[1, 0, :, :].flatten() @ self.value_decoder
+        return action[:self.action_dim], action[self.action_dim:], value_est
 
 
 class Evolve():
