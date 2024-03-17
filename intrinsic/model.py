@@ -9,7 +9,8 @@ class Intrinsic(torch.nn.Module):
     """
     def __init__(self, num_nodes, node_shape: tuple = (1, 3, 64, 64), inject_noise=True,
                  edge_module=PlasticEdges, device='cpu', track_activation_history=False,
-                 mask=None, kernel_size=3, is_resistive=True, input_mode="additive"):
+                 mask=None, kernel_size=3, is_resistive=True, input_mode="additive",
+                 optimize_weights=True):
         """
         :param num_nodes: Number of nodes in the graph.
         :param node_shape: Shape (channels and spatial of each node in the graph.
@@ -28,7 +29,7 @@ class Intrinsic(torch.nn.Module):
 
         # how much of previous state to mix into next input.
         # TODO: Perhaps there should be a "resting" state value that is exponentially returned to with time constant
-        #  resistance
+        #  resistance? (tried and seems to make optimization less stable, mb worth revisiting.)
         if self.resistive:
             self.resistance = 0.33
         else:
@@ -42,7 +43,8 @@ class Intrinsic(torch.nn.Module):
 
         # edge module takes n x c x s1 x s2 input and returns output of the same shape.
         self.edge = edge_module(self.num_nodes, node_shape[2], node_shape[3], kernel_size=kernel_size, channels=node_shape[1],
-                                device=device, mask=mask, inject_noise=inject_noise, normalize_conv=False, init_plasticity=.2)
+                                device=device, mask=mask, inject_noise=inject_noise, normalize_conv=False, init_plasticity=.2,
+                                optimize_weights=optimize_weights)
 
         # whether to add random gaussian noise at each forward step
         self.inject_noise = inject_noise
@@ -75,7 +77,7 @@ class Intrinsic(torch.nn.Module):
             else:
                 raise IndexError
         # mix state update and current state values parameterized by resistance.
-        self.states = self.resistance * (self.states + out_activ)
+        self.states = self.resistance * self.states + out_activ
         if self.past_states is not None:
             self.past_states.append(self.states.clone())
         return self.states

@@ -4,14 +4,26 @@ from intrinsic import util
 
 class PlasticEdges(torch.nn.Module):
     def __init__(self, num_nodes, spatial1, spatial2, kernel_size, channels, device='cpu',
-                 normalize_conv=True, mask=None, optimize_weights=True, debug=False, **kwargs):
+                 mask=None, optimize_weights=True, debug=False, **kwargs):
         """
-        designed to operate on a graph all at once.
+        Designed to operate on a (n, c, s, s) intrinsic graph. Defines a convolutional edge with a Hebbian-like
+        local update function between each node and each channel on the graph.
+        :param num_nodes: The number of nodes in the intrinsic graph.
+        :param spatial1: The first spatial dimension
+        :param spatial2: The second spatial dimension (should be equal to spatial1 in current version)
+        :param kernel_size: The convolution kernel size for the edges. Must be less than min(spatial1, spatial2)
+        :param channels: The number of channels in the nodes.
+        :param device: The device to preform computations on. (cpu, cuda0...n, tpu0...n)
+        :param mask: A user defined mask as a (n, n) adj matrix to modify node to node weights.
+        :param optimize_weights: Whether to fit the initial convolutional weights using gradient decent.
+        :param debug: Whether to print info about gradients and current states at runtime
+        :param kwargs: addition keyword arguments.
         """
         super().__init__()
-        # The activation memory tracks the last state of the model. It is necessary for computing the instrisic edge
+        # The activation memory tracks the last state of the model. It is necessary for computing the intrinsic edge
         # update function
         self.activation_memory = None
+        self.optimize_weights = optimize_weights
         self.num_nodes = num_nodes
         self.kernel_size, self.pad = util.conv_identity_params(in_spatial=spatial1, desired_kernel=kernel_size)
         self.channels = channels
@@ -23,14 +35,17 @@ class PlasticEdges(torch.nn.Module):
             mask = torch.ones((num_nodes, num_nodes), device=device)
         self.mask = mask
 
-        # Non-Parametric Weights used for intrinsic update
+        # initial weight parameter
         init_weight = torch.empty((num_nodes, num_nodes,
                                    1, 1,
                                    channels, channels, self.kernel_size, self.kernel_size),
                                    device=device)  # 8D Tensor.
-        self.init_weight = torch.nn.Parameter(torch.nn.init.xavier_normal_(init_weight))
+        self.init_weight = torch.nn.init.xavier_normal_(init_weight)
+        if optimize_weights:
+            self.init_weight = torch.nn.Parameter(self.init_weight)
 
-        self.weight = self._expand_base_weights(self.init_weight)
+        # Non-Parametric Weights used for intrinsic update
+        self.weight = self._expand_base_weights(self.init_weight)  # (n, n, s, s, c, c, k, k)
 
         # Channel Mapping
         chan_map = torch.empty((num_nodes, num_nodes, channels, channels), device=device)
@@ -40,13 +55,12 @@ class PlasticEdges(torch.nn.Module):
             init_plasticity = kwargs["init_plasticity"]
         else:
             init_plasticity = .1
-        self.plasticity = torch.nn.Parameter(torch.ones((num_nodes, num_nodes), device=device) * init_plasticity)
+        self.plasticity = torch.nn.Parameter(torch.ones((num_nodes, num_nodes, channels, channels), device=device) * init_plasticity)
         self.device = device
         self.unfolder = torch.nn.Unfold(kernel_size=self.kernel_size, padding=self.pad)
         self.folder = torch.nn.Fold(kernel_size=self.kernel_size,
                                     output_size=(spatial1, spatial2),
                                     padding=self.pad)
-        self.normalize = normalize_conv
         self.debug = debug
 
     def _expand_base_weights(self, in_weight):
@@ -59,6 +73,13 @@ class PlasticEdges(torch.nn.Module):
         return params
 
     def forward(self, x):
+        """
+        The forward pass on all edges. Takes (n, c, s, s) state as input, computes activation function on it, and sends
+        through the current weight matrix and channel map matrix. Returns a state update matrix with the same shape ad
+        the input, i.e. (n, c, s, s).
+        :param x: Tensor, Input intrinsic graph states (n, c, s, s)
+        :return: Tensor, update in the same space as x - (n, c, s, s)
+        """
         x = x.to(self.device)  # nodes, channels, spatial1, spatial2
         x = torch.sigmoid(x) # compute sigmoid activation on range [0, 1]
         if len(x.shape) != 4:
@@ -104,12 +125,11 @@ class PlasticEdges(torch.nn.Module):
             out.register_hook(lambda grad: print("out", grad.reshape(grad.shape[0], -1).sum(dim=-1)))
         return out
 
-    def get_weight(self):
-        return self.out_edge
-
     def update(self, target_activation):
         """
-        intrinsic update
+        Compute and apply the local hebbian like update for the weight matrix. At a high level, weights that connect
+        units that have high (near 1) activations at adjacent time steps should increase, and weights that connect units
+        with low or uneven connections at adjacent time sets should decrease.
         :param target_activation: the value of each state after forward pass before activation (nodes, channel, spatial, spatial)
         :return: None
         """
@@ -132,7 +152,7 @@ class PlasticEdges(torch.nn.Module):
 
         chan_map = self.chan_map.permute((0, 2, 1, 3)).reshape((1, self.num_nodes * self.channels, self.num_nodes * self.channels))
 
-        # This is a fast and  numerically stable equivalent to (reverse_conv ^ -1) (target_activations)
+        # This is a fast and  numerically stable equivalent to (chan_map ^ -1) (target_activations)
         target_meta_activations = torch.sigmoid(torch.linalg.solve(chan_map, target_activations))
         target_meta_activations = target_meta_activations.transpose(0, 1).reshape(self.num_nodes, self.channels, self.spatial1, self.spatial2) # u, c, s, s
 
@@ -147,7 +167,7 @@ class PlasticEdges(torch.nn.Module):
         # This is an outer product on the channel dimension and elementwise on all others.
         iterrule = "usck, vsok -> uvscok"
         coactivation = torch.exp(torch.einsum(iterrule, activ_mem, ufld_target))
-        plasticity = self.plasticity.view(self.num_nodes, self.num_nodes, 1, 1, 1, 1, 1, 1).clone()
+        plasticity = self.plasticity.view(self.num_nodes, self.num_nodes, 1, 1, self.channels, self.channels, 1, 1).clone()
 
         if self.debug:
             plasticity.register_hook(lambda grad: print("plast", grad.reshape(grad.shape[0], -1).sum(dim=-1)))
@@ -168,7 +188,10 @@ class PlasticEdges(torch.nn.Module):
         self.activation_memory = None
 
     def to(self, device):
-        self.init_weight = torch.nn.Parameter(self.init_weight.to(device))
+        if self.optimize_weights:
+            self.init_weight = torch.nn.Parameter(self.init_weight.to(device))
+        else:
+            self.init_weight = self.init_weight.to(device)
         self.weight = self.weight.to(device)
         self.chan_map = torch.nn.Parameter(self.chan_map.to(device))
         self.plasticity = torch.nn.Parameter(self.plasticity.to(device))
