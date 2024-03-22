@@ -29,7 +29,7 @@ def conv_identity_params(in_spatial, desired_kernel, stride=1):
             raise RuntimeError("Could not find kernel pad combination to maintain dimensionality")
         kernel = max(kernel - 1, 0)
 
-    print("Using kernel", kernel + 1, " and pad", int(pad))
+    # print("Using kernel", kernel + 1, " and pad", int(pad))
     return int(kernel + 1), int(pad)
 
 
@@ -58,3 +58,24 @@ def unfold_nd(input_tensor: torch.Tensor, kernel_size: int, padding: int, spatia
     # conform with Unfold modules output formatting.
     padded = padded.reshape(batch_size, kernel_channel_dim, spatial_flat_dim)
     return padded
+
+
+def triu_to_square(triu_vector, n, includes_diag=False):
+    """
+    Converts an upper triangle vector to a full (redundant) symmetrical square matrix.
+    :param tri_vector: data point vector
+    :param n: size of resulting square
+    :param includes_diag: whether the main diagonal is included in triu_vector
+    :return: a symmetric square tensor
+    """
+    if includes_diag:
+        offset = 0
+    else:
+        offset = 1
+    adj = torch.zeros((n, n), dtype=torch.float)
+    ind = torch.triu_indices(n, n, offset=offset)
+    adj[ind[0], ind[1]] = triu_vector
+    adj = (adj.T + adj)
+    if includes_diag:
+        adj = adj - torch.diag(torch.diagonal(adj) / 2)
+    return adj

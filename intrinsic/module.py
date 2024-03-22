@@ -2,7 +2,7 @@ import torch
 from intrinsic import util
 
 
-class PlasticEdges(torch.nn.Module):
+class PlasticEdges():
     def __init__(self, num_nodes, spatial1, spatial2, kernel_size, channels, device='cpu',
                  mask=None, optimize_weights=True, debug=False, **kwargs):
         """
@@ -19,7 +19,6 @@ class PlasticEdges(torch.nn.Module):
         :param debug: Whether to print info about gradients and current states at runtime
         :param kwargs: addition keyword arguments.
         """
-        super().__init__()
         # The activation memory tracks the last state of the model. It is necessary for computing the intrinsic edge
         # update function
         self.activation_memory = None
@@ -71,6 +70,9 @@ class PlasticEdges(torch.nn.Module):
     def parameters(self):
         params = [self.chan_map, self.plasticity, self.init_weight]
         return params
+
+    def __call__(self, x):
+        return self.forward(x)
 
     def forward(self, x):
         """
@@ -177,6 +179,16 @@ class PlasticEdges(torch.nn.Module):
                                                                 self.channels, self.channels,
                                                                 self.kernel_size, self.kernel_size)))
         return
+
+    def instantiate(self):
+        instance = PlasticEdges(self.num_nodes, self.spatial1, self.spatial2, self.kernel_size, self.channels,
+                                device=self.device, mask=self.mask, optimize_weights=self.optimize_weights,
+                                debug=self.debug)
+        instance.init_weight = self.init_weight.clone()
+        instance.weight = instance._expand_base_weights(instance.init_weight)
+        instance.chan_map = instance.chan_map.clone()
+        instance.plasticity = instance.plasticity.clone()
+        return instance
 
     def detach(self, reset_weight=False):
         if reset_weight:

@@ -3,7 +3,7 @@ import numpy as np
 from intrinsic.module import PlasticEdges
 
 
-class Intrinsic(torch.nn.Module):
+class Intrinsic():
     """
     Parallelized model.
     """
@@ -57,6 +57,20 @@ class Intrinsic(torch.nn.Module):
             self.past_states = None
         # hardware device to run stuff on.
         self.device = device
+
+    def instantiate(self):
+        new_model = Intrinsic(self.num_nodes, (1, self.edge.channels, self.edge.spatial1, self.edge.spatial2),
+                              inject_noise=self.inject_noise, edge_module=PlasticEdges, device=self.device,
+                              track_activation_history=self.past_states is not None, mask=self.edge.mask,
+                              kernel_size=self.edge.kernel_size, is_resistive=self.resistive,
+                              input_mode=self.input_mode,
+                              optimize_weights=self.edge.optimize_weights)
+        new_model.states = self.states
+        new_model.edge = self.edge.instantiate()
+        return new_model
+
+    def __call__(self, x=None):
+        return self.forward(x)
 
     def forward(self, x=None):
         """
