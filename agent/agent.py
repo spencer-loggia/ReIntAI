@@ -3,6 +3,7 @@ import pickle
 import random
 import sys
 import timeit
+from typing import List
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -14,7 +15,7 @@ from pettingzoo.sisl import waterworld_v4
 from scipy.ndimage import gaussian_filter
 
 
-def compute_ac_error(true_reward, value_est, action_likelihood, action_entropy, gamma):
+def compute_ac_error(true_reward, value_est: List[torch.Tensor], action_likelihood, action_entropy, gamma):
     """
 
     :param true_reward: Reward from taking action a_t in state s_t
@@ -24,10 +25,11 @@ def compute_ac_error(true_reward, value_est, action_likelihood, action_entropy, 
     :param gamma: temporal discount factor.
     :return:
     """
-    true_reward = [0.] + true_reward # the expected reward of taking no action in step 0. is 0.
-    R = torch.Tensor([0.])
-    val_loss = torch.Tensor([0.])
-    policy_loss = torch.Tensor([0.])
+    device = value_est[0].device
+    true_reward = [0.] + true_reward  # the expected reward of taking no action in step 0. is 0.
+    R = torch.Tensor([0.], device=device)
+    val_loss = torch.Tensor([0.], device=device)
+    policy_loss = torch.Tensor([0.], device=device)
     value_est.reverse()
     action_likelihood.reverse()
     for i, instant_reward in enumerate(reversed(true_reward)):
@@ -37,13 +39,13 @@ def compute_ac_error(true_reward, value_est, action_likelihood, action_entropy, 
         td = R - value_est[i]  # episode future reward in s_t - expected future reward in s_t
         val_loss = val_loss + torch.pow(td, 2)  # critic network estimates expected state values over all action dist.
         policy_loss = policy_loss + -1 * action_likelihood[i] * (td.detach())  # local td is the advantage of the action selected over state value.
-    return torch.sqrt(val_loss), policy_loss, torch.sum(torch.Tensor(action_entropy))
+    return torch.sqrt(val_loss), policy_loss, torch.sum(torch.Tensor(action_entropy, device=device))
 
 
 class WaterworldAgent():
     """
     """
-    def __init__(self, num_nodes=4, channels=3, spatial=5, kernel=3, sensors=20, action_dim=2, *args, **kwargs):
+    def __init__(self, num_nodes=4, channels=3, spatial=5, kernel=3, sensors=20, action_dim=2, device="cpu", *args, **kwargs):
         """
         Defines the core agents with extended modules for input and output.
         input node is always 0, reward signal node is always 1, output node is always 2
@@ -54,20 +56,21 @@ class WaterworldAgent():
         self.spatial = spatial
         self.action_dim = action_dim
         self.channels = channels
+        self.device = device
         self.num_sensors = sensors
         self.input_size = sensors * 5 + 2
         self.core_model = Intrinsic(num_nodes, node_shape=(1, channels, spatial, spatial), kernel_size=kernel)
 
         # transform inputs to core model space
-        input_encoder = torch.empty((self.input_size, self.spatial * self.spatial * self.channels))
+        input_encoder = torch.empty((self.input_size, self.spatial * self.spatial * self.channels), device=device)
         self.input_encoder = torch.nn.Parameter(torch.nn.init.xavier_normal_(input_encoder))
 
         # produce logits for mean and covariance of policy distribution
-        policy_decoder = torch.empty(self.spatial ** 2, 4)
+        policy_decoder = torch.empty((self.spatial ** 2, 4), device=device)
         self.policy_decoder = torch.nn.Parameter(torch.nn.init.xavier_normal_(policy_decoder))
 
         # produce critic state value estimates
-        value_decoder = torch.empty(self.spatial ** 2, 1)
+        value_decoder = torch.empty((self.spatial ** 2, 1), device=device)
         self.value_decoder = torch.nn.Parameter(torch.nn.init.xavier_normal_(value_decoder))
         self.v_lost_hist = []
         self.p_loss_hist = []
@@ -76,9 +79,10 @@ class WaterworldAgent():
         new_agent = WaterworldAgent(num_nodes=self.core_model.num_nodes,
                                     channels=self.channels, spatial=self.spatial,
                                     kernel=self.core_model.edge.kernel_size, sensors=self.num_sensors,
-                                    action_dim=self.action_dim)
+                                    action_dim=self.action_dim,
+                                    device=self.device)
         with torch.no_grad():
-            new_core = self.core_model.clone(fuzzy=True)
+            new_core = self.core_model.clone(fuzzy=fuzzy)
             new_agent.core_model = new_core
             new_agent.policy_decoder = torch.nn.Parameter(self.policy_decoder.detach().clone())
             new_agent.value_decoder = torch.nn.Parameter(self.value_decoder.detach().clone())
@@ -89,7 +93,8 @@ class WaterworldAgent():
         new_agent = WaterworldAgent(num_nodes=self.core_model.num_nodes,
                                     channels=self.channels, spatial=self.spatial,
                                     kernel=self.core_model.edge.kernel_size, sensors=self.num_sensors,
-                                    action_dim=self.action_dim)
+                                    action_dim=self.action_dim,
+                                    device=self.device)
         new_core = self.core_model.instantiate()
         new_agent.core_model = new_core
         new_agent.policy_decoder = self.policy_decoder.clone()
@@ -133,13 +138,14 @@ class WaterworldAgent():
 
 
 class Evolve():
-    def __init__(self, n_base_agents=2, instance_per_base=2, num_sensors=20):
+    def __init__(self, n_base_agents=2, instance_per_base=2, num_sensors=20, device="cpu"):
         self.num_agents = n_base_agents * instance_per_base
         self.num_base = n_base_agents
         self.instances = instance_per_base
         self.lr = .0000001
         self.sensors = num_sensors
-        self.base_agent = [WaterworldAgent(num_nodes=5, sensors=num_sensors) for _ in range(n_base_agents)]
+        self.device = device
+        self.base_agent = [WaterworldAgent(num_nodes=5, sensors=num_sensors, device=device) for _ in range(n_base_agents)]
         self.optimizers = [torch.optim.Adam(self.base_agent[i].parameters(), lr=self.lr) for i in range(n_base_agents)]
         self.v_loss_hist = []
         self.p_loss_hist = []
@@ -190,9 +196,9 @@ class Evolve():
                     if action_rad is None:
                         print("WARN: Von Mises sampling stage failed. Concentrations were", alpha, beta,
                               ". Acting randomly...")
-                        action_rad = torch.rand((1,)) * torch.pi * 2
+                        action_rad = torch.rand((1,), device=self.device) * torch.pi * 2
                     action_mag = rdist.sample()
-                    action = torch.Tensor([action_mag * torch.cos(action_rad), action_mag * torch.sin(action_rad)])
+                    action = torch.stack([action_mag * torch.cos(action_rad), action_mag * torch.sin(action_rad)])
                     # print("ACTION", action)
                     likelihood = adist.log_prob(action_rad)
                     likelihood = likelihood + rdist.log_prob(action_mag)
@@ -200,9 +206,9 @@ class Evolve():
                     agent_dict[agent]["action_likelihood"].append(likelihood)
                     agent_dict[agent]["entropy"].append(entropy)
                     agent_dict[agent]["value"].append(v_hat.clone())
-                    actions[agent] = action
+                    actions[agent] = action.detach().cpu().numpy()
                 else:
-                    actions[agent] = torch.Tensor([0., 0.])
+                    actions[agent] = np.array([0., 0.])
             observations, rewards, terminations, truncations, infos = env.step(actions)
             for i, agent in enumerate(env.agents):
                 base = agent_dict[agent]["base_index"]
@@ -240,7 +246,7 @@ class Evolve():
                 h_int = True
             gen_info, base_scores = self.play(h_int)
             best_base = base_scores.index(max(base_scores))
-            total_loss = torch.Tensor([0.])
+            total_loss = torch.Tensor([0.], device=self.device)
             for agent in gen_info.keys():
                 agent_info = gen_info[agent]
                 if agent_info["base_index"] != best_base:
@@ -267,6 +273,7 @@ class Evolve():
 
             # propogate best agent
             best_agent = self.base_agent[best_base]
+            # rand mutate only 1
             fuzzy = [False] * self.num_base
             fuzzy[random.randint(0, self.num_base - 1)] = True
             for i, ba in enumerate(self.base_agent):
@@ -281,13 +288,13 @@ if __name__ == "__main__":
         load_f = sys.argv[1]
         with open(load_f, "rb") as f:
             evo = pickle.load(f)
-            evo.instances = 2
-            evo.num_agents = 2
+            evo.instances = 6
+            evo.num_agents = 6
             evo.plot_loss()
             evo.play(human_interface=True)
     except IndexError:
         evo = Evolve(1, 6)
     evo.optimizers = [torch.optim.Adam(evo.base_agent[i].parameters(), lr=evo.lr) for i in range(evo.num_base)]
-    # evo.evolve(generations=2000)
+    evo.evolve(generations=2000)
     with open("/Users/loggiasr/Projects/ReIntAI/models/wworld_1.pkl", "wb") as f:
         pickle.dump(evo, f)
