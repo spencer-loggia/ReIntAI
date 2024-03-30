@@ -1,3 +1,5 @@
+import random
+
 import torch
 from intrinsic import util
 
@@ -186,8 +188,8 @@ class PlasticEdges():
                                 debug=self.debug)
         instance.init_weight = self.init_weight.clone()
         instance.weight = instance._expand_base_weights(instance.init_weight)
-        instance.chan_map = instance.chan_map.clone()
-        instance.plasticity = instance.plasticity.clone()
+        instance.chan_map = self.chan_map.clone()
+        instance.plasticity = self.plasticity.clone()
         return instance
 
     def detach(self, reset_weight=False):
@@ -198,6 +200,7 @@ class PlasticEdges():
         # self.chan_map = self.chan_map.detach()
         # self.plasticity = self.plasticity.detach()
         self.activation_memory = None
+        return self
 
     def to(self, device):
         if self.optimize_weights:
@@ -209,3 +212,29 @@ class PlasticEdges():
         self.plasticity = torch.nn.Parameter(self.plasticity.to(device))
         self.device = device
         return self
+
+    def clone(self, fuzzy=False):
+        instance = PlasticEdges(self.num_nodes, self.spatial1, self.spatial2, self.kernel_size, self.channels,
+                                device=self.device, mask=self.mask, optimize_weights=self.optimize_weights,
+                                debug=self.debug)
+        if fuzzy:
+            s1 = float(self.init_weight.std()) * .5
+            s2 = float(self.chan_map.std()) * .5
+            s3 = float(self.plasticity.std()) * .5
+            m1 = .05 * (random.random() - .5) * s1
+            m2 = .05 * (random.random() - .5) * s2
+            m3 = .05 * (random.random() - .5) * s3
+        else:
+            s1, s2, s3, m1, m2, m3 = 0.
+
+        instance.init_weight = torch.nn.Parameter(self.init_weight.detach().clone() + torch.normal(size=self.init_weight.shape,
+                                                                       mean=m1,
+                                                                       std=s1))
+        instance.weight = instance._expand_base_weights(instance.init_weight)
+        instance.chan_map = torch.nn.Parameter(self.chan_map.detach().clone() + torch.normal(size=self.chan_map.shape,
+                                                                 mean=m2,
+                                                                 std=s2))
+        instance.plasticity = torch.nn.Parameter(self.plasticity.detach().clone() + torch.normal(size=self.chan_map.shape,
+                                                                     mean=m3,
+                                                                     std=s3))
+        return instance
