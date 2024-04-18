@@ -30,10 +30,7 @@ class Intrinsic():
         # how much of previous state to mix into next input.
         # TODO: Perhaps there should be a "resting" state value that is exponentially returned to with time constant
         #  resistance? (tried and seems to make optimization less stable, mb worth revisiting.)
-        if self.resistive:
-            self.resistance = 0.33
-        else:
-            self.resistance = 0.0
+        self.resistance = torch.nn.Parameter(torch.Tensor([.33], device=device))
         # Initialize (n, c, s, s) state matrix using xavier method.
         states = torch.empty(size=(self.num_nodes, node_shape[1], node_shape[2], node_shape[3]), device=device)
         self.states = torch.nn.init.xavier_normal_(states)
@@ -67,6 +64,7 @@ class Intrinsic():
                               optimize_weights=self.edge.optimize_weights)
         new_model.states = self.states
         new_model.edge = self.edge.instantiate()
+        new_model.resistance = self.resistance.clone()
         return new_model
 
     def __call__(self, x=None):
@@ -108,8 +106,12 @@ class Intrinsic():
         """
         :return: list of parameters that can be optimized by gradient descent.
         """
-        params = self.edge.parameters()
+        params = self.edge.parameters() + [self.resistance]
         return params
+
+    def set_grad(self, grads):
+        self.resistance.grad = grads[-1]
+        self.edge.set_grad(grads[:-1])
 
     def l1(self):
         ps = self.parameters()
@@ -125,4 +127,5 @@ class Intrinsic():
                               optimize_weights=self.edge.optimize_weights)
         new_model.states = self.states.detach()
         new_model.edge = self.edge.clone(fuzzy=fuzzy)
+        new_model.resistance = torch.nn.Parameter(self.resistance.detach().clone())
         return new_model

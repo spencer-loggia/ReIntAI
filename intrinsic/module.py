@@ -46,7 +46,7 @@ class PlasticEdges():
             self.init_weight = torch.nn.Parameter(self.init_weight)
 
         # Non-Parametric Weights used for intrinsic update
-        self.weight = self._expand_base_weights(self.init_weight)  # (n, n, s, s, c, c, k, k)
+        self.weight = None  # (n, n, s, s, c, c, k, k)
 
         # Channel Mapping
         chan_map = torch.empty((num_nodes, num_nodes, channels, channels), device=device)
@@ -73,6 +73,11 @@ class PlasticEdges():
         params = [self.chan_map, self.plasticity, self.init_weight]
         return params
 
+    def set_grad(self, grads):
+        self.chan_map.grad = grads[0]
+        self.plasticity.grad = grads[1]
+        self.init_weight.grad = grads[2]
+
     def __call__(self, x):
         return self.forward(x)
 
@@ -84,6 +89,8 @@ class PlasticEdges():
         :param x: Tensor, Input intrinsic graph states (n, c, s, s)
         :return: Tensor, update in the same space as x - (n, c, s, s)
         """
+        if self.weight is None:
+            self.weight = self._expand_base_weights(self.init_weight)
         x = x.to(self.device)  # nodes, channels, spatial1, spatial2
         x = torch.sigmoid(x) # compute sigmoid activation on range [0, 1]
         if len(x.shape) != 4:
@@ -194,11 +201,9 @@ class PlasticEdges():
 
     def detach(self, reset_weight=False):
         if reset_weight:
-            self.weight = self._expand_base_weights(self.init_weight)
+            self.weight = None
         else:
-            self.weight = self.weight.clone()
-        # self.chan_map = self.chan_map.detach()
-        # self.plasticity = self.plasticity.detach()
+            self.weight = self.weight.detach().clone()
         self.activation_memory = None
         return self
 
@@ -218,14 +223,14 @@ class PlasticEdges():
                                 device=self.device, mask=self.mask, optimize_weights=self.optimize_weights,
                                 debug=self.debug)
         if fuzzy:
-            s1 = float(self.init_weight.std()) * .5
-            s2 = float(self.chan_map.std()) * .5
-            s3 = float(self.plasticity.std()) * .5
+            s1 = float(self.init_weight.std()) * .01
+            s2 = float(self.chan_map.std()) * .01
+            s3 = float(self.plasticity.std()) * .01
             m1 = .05 * (random.random() - .5) * s1
             m2 = .05 * (random.random() - .5) * s2
             m3 = .05 * (random.random() - .5) * s3
         else:
-            s1, s2, s3, m1, m2, m3 = 0.
+            s1 = s2 = s3 = m1 = m2 = m3 = 0.
 
         instance.init_weight = torch.nn.Parameter(self.init_weight.detach().clone() + torch.normal(size=self.init_weight.shape,
                                                                        mean=m1,

@@ -1,4 +1,5 @@
 import copy
+import math
 import pickle
 import random
 import sys
@@ -9,6 +10,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from torch import multiprocessing as mp
+
+import intrinsic.util
 from intrinsic.model import Intrinsic
 from intrinsic.util import triu_to_square
 from pettingzoo.sisl import waterworld_v4
@@ -34,18 +37,18 @@ def compute_ac_error(true_reward, value_est: List[torch.Tensor], action_likeliho
     action_likelihood.reverse()
     for i, instant_reward in enumerate(reversed(true_reward)):
         # the current estimate of future reward at time T - i
-        R = R * gamma + instant_reward
+        R = R.detach() * gamma + instant_reward
         # compute temporal difference
         td = R - value_est[i]  # episode future reward in s_t - expected future reward in s_t
         val_loss = val_loss + torch.pow(td, 2)  # critic network estimates expected state values over all action dist.
-        policy_loss = policy_loss + -1 * action_likelihood[i] * (td.detach())  # local td is the advantage of the action selected over state value.
-    return torch.sqrt(val_loss), policy_loss, torch.sum(torch.Tensor(action_entropy, device=device))
+        policy_loss = policy_loss - action_likelihood[i] * (td.detach())  # local td is the advantage of the action selected over state value.
+    return val_loss, policy_loss, torch.sum(torch.Tensor(action_entropy, device=device))
 
 
 class WaterworldAgent():
     """
     """
-    def __init__(self, num_nodes=4, channels=3, spatial=5, kernel=3, sensors=20, action_dim=2, device="cpu", *args, **kwargs):
+    def __init__(self, input_channels=2, num_nodes=4, channels=3, spatial=5, kernel=3, sensors=20, action_dim=2, device="cpu", *args, **kwargs):
         """
         Defines the core agents with extended modules for input and output.
         input node is always 0, reward signal node is always 1, output node is always 2
@@ -58,12 +61,14 @@ class WaterworldAgent():
         self.channels = channels
         self.device = device
         self.num_sensors = sensors
+        self.input_channels = input_channels
         self.input_size = sensors * 5 + 2
         self.core_model = Intrinsic(num_nodes, node_shape=(1, channels, spatial, spatial), kernel_size=kernel)
 
         # transform inputs to core model space
-        input_encoder = torch.empty((self.input_size, self.spatial * self.spatial * self.channels), device=device)
-        self.input_encoder = torch.nn.Parameter(torch.nn.init.xavier_normal_(input_encoder))
+        input_encoder = torch.empty((self.input_size, self.spatial * self.spatial * input_channels), device=device)
+        input_encoder = torch.nn.init.xavier_normal_(input_encoder)
+        self.input_encoder = torch.nn.Parameter(input_encoder)
 
         # produce logits for mean and covariance of policy distribution
         policy_decoder = torch.empty((self.spatial ** 2, 4), device=device)
@@ -80,7 +85,8 @@ class WaterworldAgent():
                                     channels=self.channels, spatial=self.spatial,
                                     kernel=self.core_model.edge.kernel_size, sensors=self.num_sensors,
                                     action_dim=self.action_dim,
-                                    device=self.device)
+                                    device=self.device,
+                                    input_channels=self.input_channels)
         with torch.no_grad():
             new_core = self.core_model.clone(fuzzy=fuzzy)
             new_agent.core_model = new_core
@@ -94,7 +100,7 @@ class WaterworldAgent():
                                     channels=self.channels, spatial=self.spatial,
                                     kernel=self.core_model.edge.kernel_size, sensors=self.num_sensors,
                                     action_dim=self.action_dim,
-                                    device=self.device)
+                                    device=self.device, input_channels=self.input_channels)
         new_core = self.core_model.instantiate()
         new_agent.core_model = new_core
         new_agent.policy_decoder = self.policy_decoder.clone()
@@ -108,8 +114,40 @@ class WaterworldAgent():
         self.policy_decoder.detach()
         return self
 
+    def pretrain_agent_input(self, epochs, obs_data, use_channels=True):
+        spatial = self.spatial
+        batch_size = 250
+        kernel, pad = intrinsic.util.conv_identity_params(spatial, 4)
+        channels = self.input_channels
+        out_feature = self.input_size
+        decoders = torch.nn.Sequential(torch.nn.Conv2d(in_channels=channels, out_channels=channels * 2, kernel_size=kernel, padding=pad),
+                                      torch.nn.MaxPool2d(2),
+                                      torch.nn.Conv2d(in_channels=channels * 2, out_channels=channels * 4, kernel_size=kernel, padding=pad),
+                                      torch.nn.MaxPool2d(2),
+                                      torch.nn.Flatten(),
+                                      torch.nn.Linear(in_features=(math.floor(spatial / 4) ** 2) * channels * 4,
+                                                      out_features=out_feature))
+        optim = torch.optim.Adam([self.input_encoder] + list(decoders.parameters()), lr=.0001)
+
+        loss_hist = []
+
+        for i in range(epochs):
+            optim.zero_grad()
+            batch = torch.from_numpy(obs_data[np.random.choice(np.arange(len(obs_data)), size=batch_size, replace=False)]).float()
+            encoded = torch.sigmoid(batch @ self.input_encoder)
+            encoded = encoded.view((batch_size, channels, spatial, spatial))
+            decoded = decoders(encoded)
+            loss = torch.sqrt(torch.mean(torch.pow(batch - decoded, 2)))
+            loss_hist.append(loss.detach().cpu().item())
+            print("epoch", i, "loss", loss_hist[-1])
+            loss.backward()
+            optim.step()
+
+        plt.plot(loss_hist)
+        plt.show()
+
     def parameters(self):
-        agent_heads = [self.value_decoder, self.policy_decoder, self.input_encoder] + self.core_model.parameters()
+        agent_heads = [self.value_decoder, self.policy_decoder] + self.core_model.parameters()
         return agent_heads
 
     def __call__(self, x=None):
@@ -122,9 +160,9 @@ class WaterworldAgent():
         """
         # create a state matrix for injection into core from input observation
         with torch.no_grad():
-            encoded_input = (X @ self.input_encoder).view(self.channels, self.spatial, self.spatial)
+            encoded_input = (X @ self.input_encoder).view(self.input_channels, self.spatial, self.spatial)
             in_states = torch.zeros_like(self.core_model.states)
-            in_states[0, :, :, :] += encoded_input
+            in_states[0, :self.input_channels, :, :] += encoded_input
         # run a model time step
         out_states = self.core_model(in_states)
         # compute next action and value estimates
@@ -138,19 +176,24 @@ class WaterworldAgent():
 
 
 class Evolve():
-    def __init__(self, n_base_agents=2, instance_per_base=2, num_sensors=20, device="cpu"):
+    def __init__(self, start_agent:WaterworldAgent, n_base_agents=2, instance_per_base=2, num_sensors=20, device="cpu"):
         self.num_agents = n_base_agents * instance_per_base
         self.num_base = n_base_agents
         self.instances = instance_per_base
-        self.lr = .0000001
+        self.lr = .0001
         self.sensors = num_sensors
         self.device = device
-        self.base_agent = [WaterworldAgent(num_nodes=5, sensors=num_sensors, device=device) for _ in range(n_base_agents)]
-        self.optimizers = [torch.optim.Adam(self.base_agent[i].parameters(), lr=self.lr) for i in range(n_base_agents)]
+        self.base_agent = [start_agent.clone(fuzzy=True) for _ in range(n_base_agents)]
+        self.critic_optimizers = [torch.optim.Adam(self.base_agent[i].core_model.parameters() +
+                                                   [self.base_agent[i].value_decoder], lr=self.lr)
+                                  for i in range(n_base_agents)]
+        self.policy_optimizers = [torch.optim.Adam(self.base_agent[i].core_model.parameters() +
+                                                   [self.base_agent[i].policy_decoder], lr=self.lr)
+                                  for i in range(n_base_agents)]
         self.v_loss_hist = []
         self.p_loss_hist = []
 
-    def play(self, human_interface=False):
+    def play(self, human_interface=False, cyles=200):
         agents = [[self.base_agent[i].detach()] for i in range(self.num_base)]
         scores = [0.] * self.num_base
         for j in range(self.num_base):
@@ -158,11 +201,11 @@ class Evolve():
                 agents[j].append(self.base_agent[j].instantiate())
         if human_interface:
             env = waterworld_v4.parallel_env(render_mode="human", n_pursuers=self.num_agents, n_coop=1,
-                                                    n_sensors=self.sensors, max_cycles=150, speed_features=False,
+                                                    n_sensors=self.sensors, max_cycles=cyles, speed_features=False,
                                                     pursuer_max_accel=.5, encounter_reward=0.0)
         else:
             env = waterworld_v4.parallel_env(n_pursuers=self.num_agents, n_coop=1, n_sensors=self.sensors,
-                                                    max_cycles=150, speed_features=False, pursuer_max_accel=.5,
+                                                    max_cycles=cyles, speed_features=False, pursuer_max_accel=.5,
                                                     encounter_reward=0.0)
         env.reset()
         agent_dict = {}
@@ -236,8 +279,9 @@ class Evolve():
             pass
 
     def evolve(self, generations=2000, disp_iter=100):
-        for i in range(len(self.optimizers)):
-            self.optimizers[i].zero_grad()
+        for i in range(self.num_base):
+            self.policy_optimizers[i].zero_grad()
+            self.critic_optimizers[i].zero_grad()
         e_hist = []
         for i, gen in enumerate(range(generations)):
             print("Generation", i)
@@ -261,12 +305,13 @@ class Evolve():
                 self.p_loss_hist.append(policy_loss.detach().cpu().item())
                 e_hist.append(entropy_loss.detach().cpu().item())
                 a = 1.0
-                b = 1.0
+                b = .5
                 c = -0.2
                 total_loss = total_loss + a * val_loss + b * policy_loss
             try:
                 total_loss.backward()
-                self.optimizers[best_base].step()
+                self.critic_optimizers[best_base].step()
+                self.policy_optimizers[best_base].step()
             except RuntimeError:
                 print("Optimization step failure on gen", gen)
                 continue
@@ -288,13 +333,13 @@ if __name__ == "__main__":
         load_f = sys.argv[1]
         with open(load_f, "rb") as f:
             evo = pickle.load(f)
-            evo.instances = 6
-            evo.num_agents = 6
+            evo.instances = 2
+            evo.num_agents = 2
             evo.plot_loss()
             evo.play(human_interface=True)
     except IndexError:
         evo = Evolve(1, 6)
     evo.optimizers = [torch.optim.Adam(evo.base_agent[i].parameters(), lr=evo.lr) for i in range(evo.num_base)]
-    evo.evolve(generations=2000)
+    #evo.evolve(generations=2000)
     with open("/Users/loggiasr/Projects/ReIntAI/models/wworld_1.pkl", "wb") as f:
         pickle.dump(evo, f)
