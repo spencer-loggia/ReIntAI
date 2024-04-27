@@ -20,7 +20,7 @@ from pettingzoo.sisl import waterworld_v4
 
 
 class WaterworldAgent:
-    def __init__(self, input_channels=2, num_nodes=4, channels=3, spatial=5, kernel=3, sensors=20, action_dim=2,
+    def __init__(self, input_channels=2, num_nodes=4, channels=3, spatial=5, kernel=3, sensors=20, action_dim=2, epsilon=0,
                  device="cpu", *args, **kwargs):
         """
         Defines the core agents with extended modules for input and output.
@@ -34,6 +34,7 @@ class WaterworldAgent:
         self.fitness = 0.  # running tally of past generation scores decaying with .8
         self.spatial = spatial
         self.action_dim = action_dim
+        self.epsilon = epsilon
         self.channels = channels
         self.device = device
         self.num_sensors = sensors
@@ -123,8 +124,10 @@ class WaterworldAgent:
             encoded = encoded.view((batch_size, channels, spatial, spatial))
             decoded = decoders(encoded)
             loss = torch.sqrt(torch.mean(torch.pow(batch - decoded, 2)))
+            reg = .001 * torch.sum(torch.abs(self.input_encoder))
             loss_hist.append(loss.detach().cpu().item())
-            print("epoch", i, "loss", loss_hist[-1])
+            print("epoch", i, "loss", loss_hist[-1], "reg", reg.detach().cpu().item())
+            loss = loss + reg
             loss.backward()
             optim.step()
 
@@ -148,28 +151,30 @@ class WaterworldAgent:
         self.input_encoder.grad = grad[0]
         self.core_model.set_grad(grad[3:])
 
-    def __call__(self, x=None):
+    def __call__(self, x=None, *args, **kwargs):
         return self.forward(x)
 
-    def forward(self, X):
+    def forward(self, X, r=None):
         """
         :param X: Agent Sensor Data
+        :param r: instant reward form last state
         :return: Mu, Sigma, Value - the mean and variance of the action distribution, and the state value estimate
         """
         # create a state matrix for injection into core from input observation
         encoded_input = (X @ self.input_encoder).view(self.input_channels, self.spatial, self.spatial)
         in_states = torch.zeros_like(self.core_model.states)
+        mask = in_states.bool()
+        mask[0, :self.input_channels, :, :] = True
         # in_states[0, :self.input_channels, :, :] = .25 * in_states[0, :self.input_channels, :, :] + .75 * encoded_input
         in_states[0, :self.input_channels, :, :] = encoded_input
+        if r is not None:
+            in_states[2, 0, :, :] = r
         # run a model time step
         for i in range(1):
-            out_states = self.core_model(in_states)
+            out_states = self.core_model(in_states, mask)
         # compute next action and value estimates
-        action_params = out_states[2, 0, :, :].flatten() @ self.policy_decoder
-        value_est = out_states[1, 0, :, :].flatten() @ self.value_decoder
-        angle_mu = action_params[0] * 2 * torch.pi + .001
-        angle_sigma = torch.abs(action_params[1]) + .001
-        rad_conc1 = torch.abs(action_params[2]) + .001
-        rad_conc2 = torch.abs(action_params[3]) + .001
-        return angle_mu, angle_sigma, rad_conc1, rad_conc2, value_est
-
+        action_params = out_states[1, 0, :, :].flatten() @ self.policy_decoder
+        value_est = out_states[2, 0, :, :].flatten() @ self.value_decoder
+        c1 = torch.abs(action_params[0:2]) + .001
+        c2 = torch.abs(action_params[2:]) + .001
+        return c1, c2, value_est

@@ -37,11 +37,11 @@ class PlasticEdges():
         self.mask = mask
 
         # initial weight parameter
-        init_weight = torch.empty((num_nodes, num_nodes,
+        self.init_weight = torch.zeros((num_nodes, num_nodes,
                                    1, 1,
-                                   channels, channels, self.kernel_size, self.kernel_size),
+                                   1, 1, self.kernel_size, self.kernel_size),
                                    device=device)  # 8D Tensor.
-        self.init_weight = torch.nn.init.xavier_normal_(init_weight)
+        self.init_weight = torch.nn.init.xavier_normal_(self.init_weight * .1)
         if optimize_weights:
             self.init_weight = torch.nn.Parameter(self.init_weight)
 
@@ -50,7 +50,7 @@ class PlasticEdges():
 
         # Channel Mapping
         chan_map = torch.empty((num_nodes, num_nodes, channels, channels), device=device)
-        self.chan_map = torch.nn.Parameter(torch.nn.init.xavier_normal_(chan_map))
+        self.chan_map = torch.nn.Parameter(torch.nn.init.xavier_normal_(chan_map * .0001))
 
         if "init_plasticity" in kwargs:
             init_plasticity = kwargs["init_plasticity"]
@@ -66,7 +66,10 @@ class PlasticEdges():
 
     def _expand_base_weights(self, in_weight):
         # adds explicit spatial dims to weights
-        expanded_weights = torch.tile(in_weight.clone(), (1, 1, self.spatial1, self.spatial2, 1, 1, 1, 1))
+        if self.init_weight.shape[4] == 1:
+            expanded_weights = torch.sigmoid(torch.tile(in_weight.clone(), (1, 1, self.spatial1, self.spatial2, self.channels, self.channels, 1, 1)))
+        else:
+            expanded_weights = torch.sigmoid(torch.tile(in_weight.clone(), (1, 1, self.spatial1, self.spatial2, 1, 1, 1, 1)))
         return expanded_weights
 
     def parameters(self):
@@ -177,13 +180,13 @@ class PlasticEdges():
 
         # This is an outer product on the channel dimension and elementwise on all others.
         iterrule = "usck, vsok -> uvscok"
+        #coactivation = torch.exp(torch.einsum(iterrule, activ_mem, ufld_target))
         coactivation = torch.exp(torch.einsum(iterrule, activ_mem, ufld_target))
         plasticity = self.plasticity.view(self.num_nodes, self.num_nodes, 1, 1, self.channels, self.channels, 1, 1).clone()
 
         if self.debug:
             plasticity.register_hook(lambda grad: print("plast", grad.reshape(grad.shape[0], -1).sum(dim=-1)))
-        self.weight = torch.log((1 - plasticity) * torch.exp(self.weight) +
-                                plasticity * coactivation.view((self.num_nodes, self.num_nodes,
+        self.weight = torch.log((1 - plasticity) * torch.exp(self.weight) + plasticity * coactivation.view((self.num_nodes, self.num_nodes,
                                                                 self.spatial1, self.spatial2,
                                                                 self.channels, self.channels,
                                                                 self.kernel_size, self.kernel_size)))
@@ -203,7 +206,8 @@ class PlasticEdges():
         if reset_weight:
             self.weight = None
         else:
-            self.weight = self.weight.detach().clone()
+            if self.weight is not None:
+                self.weight = self.weight.detach().clone()
         self.activation_memory = None
         return self
 
@@ -223,12 +227,13 @@ class PlasticEdges():
                                 device=self.device, mask=self.mask, optimize_weights=self.optimize_weights,
                                 debug=self.debug)
         if fuzzy:
-            s1 = float(self.init_weight.std()) * .01
-            s2 = float(self.chan_map.std()) * .01
-            s3 = float(self.plasticity.std()) * .01
-            m1 = .05 * (random.random() - .5) * s1
-            m2 = .05 * (random.random() - .5) * s2
-            m3 = .05 * (random.random() - .5) * s3
+            s1 = float(self.init_weight.std()) * (.5 * random.random() + .1)
+            s2 = float(self.chan_map.std()) * (.5 * random.random() + .1)
+            s3 = float(self.plasticity.std()) * (.5 * random.random() + .1)
+            # m1 = .0 * (random.random() - .5) * s1
+            # m2 = .01 * (random.random() - .5) * s2
+            # m3 = .01 * (random.random() - .5) * s3
+            m1 = m2 = m3 = 0.
         else:
             s1 = s2 = s3 = m1 = m2 = m3 = 0.
 

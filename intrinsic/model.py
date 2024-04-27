@@ -7,9 +7,9 @@ class Intrinsic():
     """
     Parallelized model.
     """
-    def __init__(self, num_nodes, node_shape: tuple = (1, 3, 64, 64), inject_noise=True,
+    def __init__(self, num_nodes, node_shape: tuple = (1, 3, 64, 64), inject_noise=False,
                  edge_module=PlasticEdges, device='cpu', track_activation_history=False,
-                 mask=None, kernel_size=3, is_resistive=True, input_mode="additive",
+                 mask=None, kernel_size=3, is_resistive=True, input_mode="overwrite",
                  optimize_weights=True):
         """
         :param num_nodes: Number of nodes in the graph.
@@ -30,7 +30,7 @@ class Intrinsic():
         # how much of previous state to mix into next input.
         # TODO: Perhaps there should be a "resting" state value that is exponentially returned to with time constant
         #  resistance? (tried and seems to make optimization less stable, mb worth revisiting.)
-        self.resistance = torch.nn.Parameter(torch.Tensor([.33], device=device))
+        self.resistance = torch.nn.Parameter(torch.zeros((num_nodes, node_shape[1], 1, 1), device=device))
         # Initialize (n, c, s, s) state matrix using xavier method.
         states = torch.empty(size=(self.num_nodes, node_shape[1], node_shape[2], node_shape[3]), device=device)
         self.states = torch.nn.init.xavier_normal_(states)
@@ -67,15 +67,16 @@ class Intrinsic():
         new_model.resistance = self.resistance.clone()
         return new_model
 
-    def __call__(self, x=None):
-        return self.forward(x)
+    def __call__(self, x=None, mask=None):
+        return self.forward(x, mask)
 
-    def forward(self, x=None):
+    def forward(self, x=None, mask=None):
         """
         :param x: optional. Tensor with the same shape as the states.
+        :param mask: boolean, optional, required with x. Which state indexes are updatable by x
         :return:
         """
-        h = self.states - 1.0 + torch.normal(0, self.noise, self.states.shape)  # inject noise (and subtract 1?)
+        h = self.states - 1 # + torch.normal(0, self.noise, self.states.shape)  # inject noise (and subtract 1?)
         self.edge.update(h)  # do local weight update
         out_activ = self.edge(h).clone()  # get output from all edges.
 
@@ -83,13 +84,13 @@ class Intrinsic():
             if x.shape == self.states.shape:
                 if self.input_mode == "overwrite":
                     # used state values should be != 0.
-                    out_activ = (out_activ * torch.logical_not(x)) + x
+                    out_activ = (out_activ * torch.logical_not(mask)) + x
                 elif self.input_mode == "additive":
                     out_activ = out_activ + x
             else:
                 raise IndexError
         # mix state update and current state values parameterized by resistance.
-        self.states = self.resistance * self.states + out_activ
+        self.states = self.states * self.resistance + out_activ
         if self.past_states is not None:
             self.past_states.append(self.states.clone())
         return self.states
