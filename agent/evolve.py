@@ -197,9 +197,10 @@ def local_evolve(q, generations, base_agents, copies, reward_function, train_act
                 a = .05
                 b = .05
                 if train_act:
-                    total_loss[agent_info["base_index"]] = total_loss[agent_info["base_index"]] + b * policy_loss
+                    b = .005
                 if train_critic:
-                    total_loss[agent_info["base_index"]] = total_loss[agent_info["base_index"]] + a * val_loss
+                    a = .005
+                total_loss[agent_info["base_index"]] = total_loss[agent_info["base_index"]] + a * val_loss + b * policy_loss
             else:
                 agent_info["failure"] = True
                 stat_tracker[agent_info["base_name"]]["Failure"] = True
@@ -323,7 +324,7 @@ class EvoController:
         use_base = []
         for i in use_base_idx:
             a = self.base_agent[i].clone(fuzzy=False)
-            a.epsilon = max(-(1/2000) * self.full_count + self.epsilon, .01)
+            a.epsilon = max(-(1/4000) * self.full_count + self.epsilon, .01)
             use_base.append(self.base_agent[i].clone(fuzzy=False))
         # use_base = [self.base_agent[i].clone(fuzzy=False) for i in use_base_idx]
         # v_optim = [self.value_opitmizers[use_base[i].id].param_groups[0] for i in range(len(use_base))]
@@ -626,13 +627,14 @@ class EvoController:
 
 
 if __name__=="__main__":
+    torch.multiprocessing.set_start_method('spawn')
     agent = WaterworldAgent(num_nodes=4, spatial=7, channels=3, input_channels=3)
     with open("/Users/loggiasr/Projects/ReIntAI/models/wworld_pretrain7.pkl", "rb") as f:
         in_enc = pickle.load(f)
     agent.input_encoder = in_enc
     base = pickle
     evo = EvoController(seed_agent=agent, epochs=20000, num_base=4, num_workers=10,
-                        min_agents=1, max_agents=3, min_gen=2, max_gen=2, log_min_lr=-7, log_max_lr=-3.5)
+                        min_agents=1, max_agents=3, min_gen=1, max_gen=1, log_min_lr=-7, log_max_lr=-3)
     # evo.load_model("/Users/loggiasr/Projects/ReIntAI/models/evo_7/snap_2999_6.91_.pkl")
     evo.controller(mp=True, fbase="/Users/loggiasr/Projects/ReIntAI/models/evo_7")
 
