@@ -64,7 +64,7 @@ class _pseudo_queue(deque):
 class EvoController:
     def __init__(self, seed_agent: WaterworldAgent, epochs=10, num_base=4,
                  min_gen=10, max_gen=30, min_agents=3, max_agents=8,
-                 log_min_lr=-13., log_max_lr=-8., num_workers=6, worker_device="cpu"):
+                 log_min_lr=-13., log_max_lr=-8., num_workers=6, worker_device="cpu", viz=True):
         self.num_base = num_base
         self.log_min_lr = log_min_lr
         self.log_max_lr = log_max_lr
@@ -74,6 +74,7 @@ class EvoController:
         self.min_agents = min_agents
         self.max_agents = max_agents
         self.last_grad = [0. for _ in seed_agent.parameters()]
+        self.viz=viz
 
         self.reward_function = ActorCritic(gamma=.98, alpha=.007)
         self.full_count = 0
@@ -92,16 +93,17 @@ class EvoController:
         self.policy_loss_hist = []
         self.fitness_hist = []
 
-        # local display figure
-        self.fig, self.axs = plt.subplots(3)
-        self.axs[0].set_ylabel("Value loss")
-        self.axs[1].set_ylabel("Policy loss")
+        if self.viz:
+            # local display figure
+            self.fig, self.axs = plt.subplots(3)
+            self.axs[0].set_ylabel("Value loss")
+            self.axs[1].set_ylabel("Policy loss")
 
-        # global loss display figures
-        #self.global_fig, self.global_axs = plt.subplots(3)
-        self.axs[2].set_ylabel("Fitness")
-        self.axs[2].set_ylim((-.05, .2))
-        plt.show()
+            # global loss display figures
+            #self.global_fig, self.global_axs = plt.subplots(3)
+            self.axs[2].set_ylabel("Fitness")
+            self.axs[2].set_ylim((-.05, .2))
+            plt.show()
 
         # self.global_fig.suptitle("Overall Loss Progress")
 
@@ -350,7 +352,7 @@ class EvoController:
         except KeyError:
             print("No reward fxn in saved dict.")
 
-    def controller(self, mp=True, disp_iter=500, fbase="/Users/loggiasr/Projects/ReIntAI/models/evo_7", viz=True):
+    def controller(self, mp=True, disp_iter=500, fbase="/Users/loggiasr/Projects/ReIntAI/models/evo_7"):
         num_workers = self.num_workers
         workers = {}
         epoch = 0
@@ -385,7 +387,7 @@ class EvoController:
                     epoch += 1
                     self.full_count += 1
             else:
-                if viz and (epoch + 1) % disp_iter == 0:
+                if self.viz and (epoch + 1) % disp_iter == 0:
                     self.spawn_visualization_worker(mp=False)
                 else:
                     self.spawn_worker(integration_q, mp=False)
@@ -394,7 +396,7 @@ class EvoController:
                 stats, rf = integration_q.get(block=True)  # , v_optims, p_optims
                 self.reward_function = self.reward_function + rf
                 self.integrate(stats)
-                if viz and (epoch + 1) % (disp_iter // 10) == 0:
+                if self.viz and (epoch + 1) % (disp_iter // 10) == 0:
                     self.visualize()
         for k in workers.keys():
             workers[k].join()
@@ -405,10 +407,10 @@ class EvoController:
             fitness = round(a.fitness, 2)
             with open("../models/" + name + "_" + str(a.core_model.num_nodes) + "_" + str(fitness) + ".pkl", "wb") as f:
                 pickle.dump(a.detach(), f)
-        if viz:
+        if self.viz:
             self.visualize()
             self.spawn_visualization_worker(mp=True)
-        plt.show(block=True)
+            plt.show(block=True)
         integration_q.close()
 
     def visualize(self):
