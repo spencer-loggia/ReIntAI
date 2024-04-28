@@ -131,7 +131,7 @@ toml==0.10.2
 tomli==2.0.1
 torch==2.0.1
 torchaudio==2.0.2
-torchvision==0.15.2a0
+torchvision==0.15.*
 tornado==6.3.2
 traitlets==5.7.1
 typing_extensions==4.7.1
