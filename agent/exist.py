@@ -214,7 +214,7 @@ def local_evolve(q, generations, base_agents, copies, reward_function, train_act
                 total_loss[i].backward()
                 for j, p in enumerate(a.parameters()):
                     if not torch.isnan(p.grad).any():
-                        stat_tracker[a.id]["gradient"][j] += p.grad
+                        stat_tracker[a.id]["gradient"][j] += p.grad.detach()
                     else:
                         print("NaN grad", a.id)
                         stat_tracker[a.id]["failure"] = True
@@ -232,6 +232,6 @@ def local_evolve(q, generations, base_agents, copies, reward_function, train_act
             if stat_tracker[k]["fitness"] is not None:
                 stat_tracker[k]["fitness"] = np.mean(stat_tracker[k]["fitness"])
 
-    q.put(([a.detach() for a in base_agents], stat_tracker, reward_function))
+    q.put((stat_tracker, reward_function))
     return
 

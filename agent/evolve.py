@@ -195,19 +195,13 @@ class EvoController:
                 self.policy_opitmizers.pop(k.id)
         self.base_agent = self.base_agent[:num_survivors]
 
-    def integrate(self, new_agents, stats):
+    def integrate(self, stats):
         # survivors = self.survival(new_agents)
-        #num_survivors = len(survivors)
         alive = set(self.base_agent)
-        all_agents = alive.union(set(new_agents))
         # updates evo tree with stats
-        for a in all_agents:
+        for a in self.base_agent:
             id = a.id
-            if a not in alive:
-                print(a.id, "went extinct after", a.version, "generations")
-                continue
-                # self.base_agent.append(a)
-            elif id not in stats:
+            if id not in stats:
                 continue
             if stats[id]["failure"]:
                 print("FAILURE DETECTED: ", id)
@@ -386,9 +380,9 @@ class EvoController:
                     self.spawn_worker(integration_q, mp=False)
                 epoch += 1
             if not integration_q.empty():
-                ret_agents, stats, rf = integration_q.get(block=True)  # , v_optims, p_optims
+                stats, rf = integration_q.get(block=True)  # , v_optims, p_optims
                 self.reward_function = self.reward_function + rf
-                self.integrate(ret_agents, stats)
+                self.integrate(stats)
                 if (epoch + 1) % (disp_iter // 10) == 0:
                     self.visualize()
         for k in workers.keys():

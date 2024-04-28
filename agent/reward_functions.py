@@ -28,8 +28,8 @@ class ActorCritic:
         sg = self._stat_gamma
         self.count += 1
         sg = sg * (1 - 1 / self.count)
-        self.mean = self.mean * sg + (1 - sg) * returns.mean()
-        self.std = self.std * sg + (1 - sg) * (returns.std())
+        self.mean = self.mean * sg + (1 - sg) * returns.mean().detach().item()
+        self.std = self.std * sg + (1 - sg) * (returns.std().detach().item())
         returns = (returns - self.mean) / (self.std + 1e-8)
         # Calculate the critic loss
         critic_loss = F.mse_loss(value_estimates[:-15].squeeze(), returns)
@@ -64,8 +64,8 @@ class Reinforce:
         sg = self._stat_gamma
         self.count += 1
         sg = sg * (1 - 1 / self.count)
-        self.mean = self.mean * sg + (1 - sg) * returns.mean()
-        self.std = self.std * sg + (1 - sg) * (returns.std())
+        self.mean = self.mean * sg + (1 - sg) * returns.mean().detach().item()
+        self.std = self.std * sg + (1 - sg) * (returns.std().detach().item())
         returns = (returns - self.mean) / (self.std + 1e-8)
         # Calculate the actor loss incorporating the entropy term
         policy_loss = -(log_probs * returns + self.alpha * entropies).mean()
