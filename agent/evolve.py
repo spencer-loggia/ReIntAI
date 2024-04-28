@@ -391,6 +391,8 @@ class EvoController:
                 self.integrate(ret_agents, stats)
                 if (epoch + 1) % (disp_iter // 10) == 0:
                     self.visualize()
+        for k in workers.keys():
+            workers[k].join()
         print("DONE: one last visualization...")
         # save models
         for a in self.base_agent:
