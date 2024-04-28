@@ -345,7 +345,7 @@ class EvoController:
         except KeyError:
             print("No reward fxn in saved dict.")
 
-    def controller(self, mp=True, disp_iter=500, fbase="/Users/loggiasr/Projects/ReIntAI/models/evo_7"):
+    def controller(self, mp=True, disp_iter=500, fbase="/Users/loggiasr/Projects/ReIntAI/models/evo_7", viz=True):
         num_workers = self.num_workers
         workers = {}
         epoch = 0
@@ -367,7 +367,7 @@ class EvoController:
                     workers.pop(k)
                 if len(workers) < num_workers and epoch <= self.epochs:
                     pid = "".join(random.choices("ABCDEFG1234567", k=5))
-                    if (epoch) % disp_iter == 0:
+                    if (epoch + 1) % disp_iter == 0:
                         print("Episode Display Worker", pid)
                         if epoch != 0:
                             self.save_model(epoch, fbase)
@@ -380,7 +380,7 @@ class EvoController:
                     epoch += 1
                     self.full_count += 1
             else:
-                if (epoch + 1) % disp_iter == 0:
+                if viz and (epoch + 1) % disp_iter == 0:
                     self.spawn_visualization_worker(mp=False)
                 else:
                     self.spawn_worker(integration_q, mp=False)
@@ -389,7 +389,7 @@ class EvoController:
                 ret_agents, stats, rf = integration_q.get(block=True)  # , v_optims, p_optims
                 self.reward_function = self.reward_function + rf
                 self.integrate(ret_agents, stats)
-                if (epoch) % (disp_iter // 10) == 0:
+                if (epoch + 1) % (disp_iter // 10) == 0:
                     self.visualize()
         print("DONE: one last visualization...")
         # save models
@@ -399,7 +399,8 @@ class EvoController:
             with open("../models/" + name + "_" + str(a.core_model.num_nodes) + "_" + str(fitness) + ".pkl", "wb") as f:
                 pickle.dump(a.detach(), f)
         self.visualize()
-        self.spawn_visualization_worker(mp=True)
+        if viz:
+            self.spawn_visualization_worker(mp=True)
         plt.show(block=True)
         integration_q.close()
 
