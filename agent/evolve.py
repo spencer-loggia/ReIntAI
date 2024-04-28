@@ -17,7 +17,7 @@ from collections import deque
 
 from agent.agents import WaterworldAgent
 from agent.reward_functions import Reinforce, ActorCritic
-from agent.exist import local_evolve, episode, mypause
+from agent.exist import local_evolve, episode
 from scipy.ndimage import uniform_filter1d
 
 
@@ -32,6 +32,17 @@ def _compute_loss_values(arr, copies=None, window=15):
         copies = copies / np.sum(copies)
         score = np.nansum(arr * copies)
     return score
+
+def mypause(interval):
+    backend = plt.rcParams['backend']
+    if backend in matplotlib.rcsetup.interactive_bk:
+        figManager = matplotlib._pylab_helpers.Gcf.get_active()
+        if figManager is not None:
+            canvas = figManager.canvas
+            if canvas.figure.stale:
+                canvas.draw()
+            canvas.start_event_loop(interval)
+            return
 
 
 class _pseudo_queue(deque):
