@@ -1,25 +1,11 @@
 import random
 
 import matplotlib
-import matplotlib.pyplot as plt
-
-matplotlib.use('Qt5Agg')
 
 import numpy as np
 import torch
 
 from pettingzoo.sisl import waterworld_v4
-
-def mypause(interval):
-    backend = plt.rcParams['backend']
-    if backend in matplotlib.rcsetup.interactive_bk:
-        figManager = matplotlib._pylab_helpers.Gcf.get_active()
-        if figManager is not None:
-            canvas = figManager.canvas
-            if canvas.figure.stale:
-                canvas.draw()
-            canvas.start_event_loop(interval)
-            return
 
 def episode(base_agents, copies, min_cycles=600, max_cycles=600, sensors=20, human=False, device="cpu"):
     num_base = len(base_agents)
@@ -32,7 +18,6 @@ def episode(base_agents, copies, min_cycles=600, max_cycles=600, sensors=20, hum
             num_agents += 1
             agents[j].append(base_agents[j].instantiate())
     if human:
-        obs_fig, obs_ax = plt.subplots(1)
         env = waterworld_v4.parallel_env(render_mode="human", n_pursuers=num_agents, n_coop=1,
                                          n_sensors=sensors, max_cycles=cycles, speed_features=False,
                                          pursuer_max_accel=.25, encounter_reward=0.1, food_reward=8.0,
@@ -69,17 +54,6 @@ def episode(base_agents, copies, min_cycles=600, max_cycles=600, sensors=20, hum
             if len(agent_dict[agent]["inst_r"]) > 0:
                 inst_r = agent_dict[agent]["inst_r"][-1]
             c1, c2, v_hat = agent_dict[agent]["model"](torch.from_numpy(observations[agent]) + .00001, inst_r + .00001)
-            if human:
-                m = agent_dict[agent]["model"]
-                with torch.no_grad():
-                    obs_ax.cla()
-                    proj_obs = (torch.from_numpy(observations[agent])) @ m.input_encoder
-                    proj_obs = torch.sigmoid(proj_obs)
-                    proj_obs = (proj_obs - torch.min(proj_obs))
-                    proj_obs = proj_obs / torch.max(proj_obs)
-                    proj_obs = proj_obs.view(m.input_channels, m.spatial, m.spatial)
-                    obs_ax.imshow(proj_obs.permute((1, 2, 0)).detach().cpu().numpy())
-                    mypause(.05)
             # c1, c2, v_hat = agent_dict[agent]["model"](torch.from_numpy(observations[agent]) + .0001)
             with torch.no_grad():
                 if torch.isnan(c1 + c2 + v_hat).any():
@@ -100,14 +74,7 @@ def episode(base_agents, copies, min_cycles=600, max_cycles=600, sensors=20, hum
                 likelihood_x = x_dist.log_prob(action_x)
                 likelihood_y = y_dist.log_prob(action_y)
                 entropy = x_dist.entropy() + y_dist.entropy()
-                # if entropy > 2000:
-                #     from matplotlib import pyplot as plt
-                #     with torch.no_grad():
-                #         x = 2 * torch.pi * torch.arange(1000) / 1000
-                #         l = torch.stack([adist.log_prob(xi) for xi in x])
-                #     plt.ylim((-100, 0.1))
-                #     plt.plot(x.numpy(), l.numpy())
-                #     plt.show()
+
                 agent_dict[agent]["action_likelihood"].append(likelihood_x + likelihood_y)
                 agent_dict[agent]["entropy"].append(entropy)
                 agent_dict[agent]["value"].append(v_hat.clone())

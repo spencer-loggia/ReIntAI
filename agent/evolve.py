@@ -383,7 +383,7 @@ class EvoController:
                 stats, rf = integration_q.get(block=True)  # , v_optims, p_optims
                 self.reward_function = self.reward_function + rf
                 self.integrate(stats)
-                if (epoch + 1) % (disp_iter // 10) == 0:
+                if viz and (epoch + 1) % (disp_iter // 10) == 0:
                     self.visualize()
         for k in workers.keys():
             workers[k].join()
@@ -394,8 +394,8 @@ class EvoController:
             fitness = round(a.fitness, 2)
             with open("../models/" + name + "_" + str(a.core_model.num_nodes) + "_" + str(fitness) + ".pkl", "wb") as f:
                 pickle.dump(a.detach(), f)
-        self.visualize()
         if viz:
+            self.visualize()
             self.spawn_visualization_worker(mp=True)
         plt.show(block=True)
         integration_q.close()
