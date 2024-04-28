@@ -4,7 +4,7 @@ import pickle
 
 if __name__=="__main__":
     agent = WaterworldAgent(num_nodes=4, spatial=7, channels=3, input_channels=3)
-    with open("/Users/loggiasr/Projects/ReIntAI/models/wworld_pretrain7.pkl", "rb") as f:
+    with open("/models/wworld_pretrain7.pkl", "rb") as f:
         in_enc = pickle.load(f)
     agent.input_encoder = in_enc
     base = pickle
