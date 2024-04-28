@@ -9,6 +9,6 @@ if __name__=="__main__":
     agent.input_encoder = in_enc
     base = pickle
     evo = EvoController(seed_agent=agent, epochs=20000, num_base=4, num_workers=12,
-                        min_agents=1, max_agents=3, min_gen=1, max_gen=1, log_min_lr=-8, log_max_lr=-4)
+                        min_agents=1, max_agents=3, min_gen=1, max_gen=1, log_min_lr=-10, log_max_lr=-5)
     # evo.load_model("/Users/loggiasr/Projects/ReIntAI/models/evo_7/snap_2999_6.91_.pkl")
     evo.controller(mp=True, fbase="models/evo_7")

@@ -368,7 +368,7 @@ class EvoController:
                 for k in workers.keys():
                     if not workers[k].is_alive():
                         print("Killing worker", k)
-                        workers[k].close()
+                        workers[k].join()
                         to_remove.append(k)
                 for k in to_remove:
                     workers.pop(k)

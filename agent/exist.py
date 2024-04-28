@@ -146,9 +146,9 @@ def local_evolve(q, generations, base_agents, copies, reward_function, train_act
                 a = .05
                 b = .05
                 if train_act:
-                    b = .005
+                    b = .001
                 if train_critic:
-                    a = .005
+                    a = .001
                 total_loss[agent_info["base_index"]] = total_loss[agent_info["base_index"]] + a * val_loss + b * policy_loss
             else:
                 agent_info["failure"] = True
