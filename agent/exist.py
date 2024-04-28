@@ -165,7 +165,7 @@ def local_evolve(q, generations, base_agents, copies, reward_function, train_act
             agent_info = gen_info[agent]
             if not agent_info["failure"] and not stat_tracker[agent_info["base_name"]]["failure"]:
                 val_loss, policy_loss = reward_function.loss(torch.Tensor([0.] + agent_info["inst_r"], device=device),
-                                                                       torch.concatenate(agent_info["value"], dim=0),
+                                                                       torch.concat(agent_info["value"], dim=0),
                                                                        torch.stack(agent_info["action_likelihood"], dim=0),
                                                                        torch.stack(agent_info["entropy"], dim=0))
                 # policy_loss = reward_function.loss(torch.Tensor([0.] + agent_info["inst_r"], device=device),
