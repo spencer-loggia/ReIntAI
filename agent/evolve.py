@@ -111,7 +111,7 @@ class EvoController:
         # self.tree_fig, self.tree_axs = plt.subplots(1)
         # self.tree_fig.suptitle("Evolutionary Tree")
 
-    def spawn_worker(self, integration_q, mp=True):
+    def spawn_worker(self, integration_q, pid, mp=True):
         for i in range(len(self.base_agent)):
             self._add_optimizer_set(self.base_agent[i])
         num_gens = random.randint(self.min_gen, self.max_gen)
@@ -135,10 +135,10 @@ class EvoController:
             train_actor = True
         if mp:
             p = Process(target=local_evolve,
-                        args=(integration_q, num_gens, use_base, copies.tolist(), self.reward_function, train_actor, train_critic))
+                        args=(integration_q, num_gens, use_base, copies.tolist(), self.reward_function, train_actor, train_critic, pid))
             return p
         else:
-            local_evolve(integration_q, num_gens, use_base, copies.tolist(), self.reward_function, train_actor, train_critic)
+            local_evolve(integration_q, num_gens, use_base, copies.tolist(), self.reward_function, train_actor, train_critic, pid)
             return None
 
     def multiclone(self, agent1: WaterworldAgent, agent2: WaterworldAgent, equal=False):
@@ -357,31 +357,36 @@ class EvoController:
         workers = {}
         epoch = 0
         fail = False
+        to_kill = set()
         if mp:
             integration_q = Queue(maxsize=100)
         else:
             integration_q = _pseudo_queue()
         while (epoch <= self.epochs and not fail) or len(workers) > 0:
             # time.sleep(.05)
-            to_remove = []
+            # to_remove = []
             if mp:
-                for k in workers.keys():
-                    if not workers[k].is_alive():
-                        print("Killing worker", k)
-                        workers[k].join()
-                        to_remove.append(k)
-                for k in to_remove:
+                for k in to_kill:
+                    workers[k].join()
                     workers.pop(k)
+                to_kill = set()
+                # for k in workers.keys():
+                #     if not workers[k].is_alive():
+                #         print("Killing worker", k)
+                #         workers[k].join()
+                #         to_remove.append(k)
+                # for k in to_remove:
+                #     workers.pop(k)
                 if len(workers) < num_workers and epoch <= self.epochs:
                     pid = "".join(random.choices("ABCDEFG1234567", k=5))
                     if (epoch + 1) % disp_iter == 0:
                         print("Episode Display Worker", pid)
                         if epoch != 0:
                             self.save_model(epoch, fbase)
-                        p = self.spawn_visualization_worker()
+                        p = self.spawn_visualization_worker(mp=False)
                     else:
                         print("Worker", pid, "handling epoch", epoch)
-                        p = self.spawn_worker(integration_q)
+                        p = self.spawn_worker(integration_q, pid)
                     workers[pid] = p
                     p.start()
                     epoch += 1
@@ -390,10 +395,14 @@ class EvoController:
                 if self.viz and (epoch + 1) % disp_iter == 0:
                     self.spawn_visualization_worker(mp=False)
                 else:
-                    self.spawn_worker(integration_q, mp=False)
+                    self.spawn_worker(integration_q, 0, mp=False)
                 epoch += 1
             if not integration_q.empty():
-                stats, rf = integration_q.get(block=True)  # , v_optims, p_optims
+                stats, rf, pid = integration_q.get(block=True)  # , v_optims, p_optims
+                to_kill.add(pid)
+                if stats is None:
+                    print("Worker", pid, "FAILED")
+                    continue
                 self.reward_function = self.reward_function + rf
                 self.integrate(stats)
                 if self.viz and (epoch + 1) % (disp_iter // 10) == 0:
@@ -409,7 +418,7 @@ class EvoController:
                 pickle.dump(a.detach(), f)
         if self.viz:
             self.visualize()
-            self.spawn_visualization_worker(mp=True)
+            self.spawn_visualization_worker(mp=False)
             plt.show(block=True)
         integration_q.close()
 

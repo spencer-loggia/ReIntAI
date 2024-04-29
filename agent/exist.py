@@ -1,4 +1,5 @@
 import random
+import time
 
 import numpy as np
 import torch
@@ -101,102 +102,105 @@ def episode(base_agents, copies, min_cycles=600, max_cycles=600, sensors=20, hum
     return agent_dict, scores
 
 
-def local_evolve(q, generations, base_agents, copies, reward_function, train_act=True, train_critic=True, device="cpu"):
-    num_base = len(base_agents)
-    #if value_optim_params is not None:
-        #for i in range(num_base):
-            #value_optimizers[i].param_groups[0] = value_optim_params[i]
-            #policy_optimizers[i].param_groups[0] = policy_optim_params[i]
+def local_evolve(q, generations, base_agents, copies, reward_function, train_act=True, train_critic=True, proc=0, device="cpu"):
+    try:
+        num_base = len(base_agents)
+        #if value_optim_params is not None:
+            #for i in range(num_base):
+                #value_optimizers[i].param_groups[0] = value_optim_params[i]
+                #policy_optimizers[i].param_groups[0] = policy_optim_params[i]
 
-    fail_tracker = [False for _ in range(num_base)]
-    stat_tracker = {a.id: {"gradient": [0. for _ in a.parameters()],
-                           "value_loss": [],
-                           "policy_loss": [],
-                           "entropy": [],
-                           "fitness": [],
-                           "copies": copies[i] * generations,
-                           "failure": False} for i, a in enumerate(base_agents)}
+        fail_tracker = [False for _ in range(num_base)]
+        stat_tracker = {a.id: {"gradient": [0. for _ in a.parameters()],
+                               "value_loss": [],
+                               "policy_loss": [],
+                               "entropy": [],
+                               "fitness": [],
+                               "copies": copies[i] * generations,
+                               "failure": False} for i, a in enumerate(base_agents)}
 
-    for gen in range(generations):
-        h_int = False
-        total_loss = [torch.Tensor([0.], device=device) for _ in range(num_base)]
-        gen_info, base_scores = episode(base_agents, copies, h_int)
-        for a in stat_tracker.keys():
-            stat_tracker[a]["value_loss"].append([])
-            stat_tracker[a]["policy_loss"].append([])
-            stat_tracker[a]["entropy"].append([])
+        for gen in range(generations):
+            h_int = False
+            total_loss = [torch.Tensor([0.], device=device) for _ in range(num_base)]
+            gen_info, base_scores = episode(base_agents, copies, h_int)
+            for a in stat_tracker.keys():
+                stat_tracker[a]["value_loss"].append([])
+                stat_tracker[a]["policy_loss"].append([])
+                stat_tracker[a]["entropy"].append([])
 
-        for agent in gen_info.keys():
-            agent_info = gen_info[agent]
-            if not agent_info["failure"] and not stat_tracker[agent_info["base_name"]]["failure"]:
-                val_loss, policy_loss = reward_function.loss(torch.Tensor([0.] + agent_info["inst_r"], device=device),
-                                                                       torch.concat(agent_info["value"], dim=0),
-                                                                       torch.stack(agent_info["action_likelihood"], dim=0),
-                                                                       torch.stack(agent_info["entropy"], dim=0))
-                # policy_loss = reward_function.loss(torch.Tensor([0.] + agent_info["inst_r"], device=device),
-                #                                                        torch.stack(agent_info["action_likelihood"], dim=0),
-                #                                                        torch.stack(agent_info["entropy"], dim=0))
+            for agent in gen_info.keys():
+                agent_info = gen_info[agent]
+                if not agent_info["failure"] and not stat_tracker[agent_info["base_name"]]["failure"]:
+                    val_loss, policy_loss = reward_function.loss(torch.Tensor([0.] + agent_info["inst_r"], device=device),
+                                                                           torch.concat(agent_info["value"], dim=0),
+                                                                           torch.stack(agent_info["action_likelihood"], dim=0),
+                                                                           torch.stack(agent_info["entropy"], dim=0))
+                    # policy_loss = reward_function.loss(torch.Tensor([0.] + agent_info["inst_r"], device=device),
+                    #                                                        torch.stack(agent_info["action_likelihood"], dim=0),
+                    #                                                        torch.stack(agent_info["entropy"], dim=0))
 
-               # val_loss = torch.Tensor([8.])
-                if torch.isnan(val_loss + policy_loss):
-                    print("NaN is gradient!", agent_info["base_name"])
-                stat_tracker[agent_info["base_name"]]["value_loss"][-1].append(val_loss.detach().cpu().item())
-                stat_tracker[agent_info["base_name"]]["policy_loss"][-1].append(policy_loss.detach().cpu().item())
-                stat_tracker[agent_info["base_name"]]["copies"] += 1
-                a = .05
-                b = .05
-                if train_act:
-                    b = .001
-                if train_critic:
-                    a = .001
-                total_loss[agent_info["base_index"]] = total_loss[agent_info["base_index"]] + a * val_loss + b * policy_loss
-            else:
-                agent_info["failure"] = True
-                stat_tracker[agent_info["base_name"]]["Failure"] = True
-                fail_tracker[agent_info["base_index"]] = True
-                stat_tracker[agent_info["base_name"]]["value_loss"][-1].append(None)
-                stat_tracker[agent_info["base_name"]]["policy_loss"][-1].append(None)
-                stat_tracker[agent_info["base_name"]]["entropy"][-1].append(None)
-                stat_tracker[agent_info["base_name"]]["failure"] = True
-                fail_tracker[agent_info["base_index"]] = True
-        for j, score in enumerate(base_scores):
-            a = base_agents[j]
-            if stat_tracker[a.id]["fitness"] is None:
-                continue
-            if score is None:
-                stat_tracker[a.id]["fitness"] = None
-            else:
-                stat_tracker[a.id]["fitness"].append(score)
-        for i in range(num_base):
-            if not fail_tracker[i]:
-                a = base_agents[i]
-                reg = torch.sum(torch.abs(a.input_encoder))
-                reg = reg + torch.sum(torch.abs(a.core_model.edge.init_weight))
-                reg = reg + torch.sum(torch.abs(a.core_model.edge.chan_map))
-                reg = reg + torch.sum(torch.abs(a.value_decoder))
-                reg = reg + torch.sum(torch.abs(a.policy_decoder))
-                total_loss[i] = total_loss[i] + .0001 * reg
-                total_loss[i].backward()
-                for j, p in enumerate(a.parameters()):
-                    if not torch.isnan(p.grad).any():
-                        stat_tracker[a.id]["gradient"][j] += p.grad.detach()
-                    else:
-                        print("NaN grad", a.id)
-                        stat_tracker[a.id]["failure"] = True
-                        stat_tracker[a.id]["gradient"][j] += torch.zeros_like(p.grad)
-                        fail_tracker[i] = True
-                # value_optimizers[i].step()
-                # policy_optimizers[i].step()
-    # average and cast to numpy
-    for k in stat_tracker.keys():
-        if not stat_tracker[k]["failure"]:
-            for pid in range(len(stat_tracker[k]["gradient"])):
-                stat_tracker[k]["gradient"][pid] *= 1e-1
-            stat_tracker[k]["value_loss"] = np.nanmean(np.array(stat_tracker[k]["value_loss"], dtype=float))
-            stat_tracker[k]["policy_loss"] = np.nanmean(np.array(stat_tracker[k]["policy_loss"], dtype=float))
-            if stat_tracker[k]["fitness"] is not None:
-                stat_tracker[k]["fitness"] = np.mean(stat_tracker[k]["fitness"])
-
-    q.put((stat_tracker, reward_function))
+                   # val_loss = torch.Tensor([8.])
+                    if torch.isnan(val_loss + policy_loss):
+                        print("NaN is gradient!", agent_info["base_name"])
+                    stat_tracker[agent_info["base_name"]]["value_loss"][-1].append(val_loss.detach().cpu().item())
+                    stat_tracker[agent_info["base_name"]]["policy_loss"][-1].append(policy_loss.detach().cpu().item())
+                    stat_tracker[agent_info["base_name"]]["copies"] += 1
+                    a = .05
+                    b = .05
+                    if train_act:
+                        b = .001
+                    if train_critic:
+                        a = .001
+                    total_loss[agent_info["base_index"]] = total_loss[agent_info["base_index"]] + a * val_loss + b * policy_loss
+                else:
+                    agent_info["failure"] = True
+                    stat_tracker[agent_info["base_name"]]["Failure"] = True
+                    fail_tracker[agent_info["base_index"]] = True
+                    stat_tracker[agent_info["base_name"]]["value_loss"][-1].append(None)
+                    stat_tracker[agent_info["base_name"]]["policy_loss"][-1].append(None)
+                    stat_tracker[agent_info["base_name"]]["entropy"][-1].append(None)
+                    stat_tracker[agent_info["base_name"]]["failure"] = True
+                    fail_tracker[agent_info["base_index"]] = True
+            for j, score in enumerate(base_scores):
+                a = base_agents[j]
+                if stat_tracker[a.id]["fitness"] is None:
+                    continue
+                if score is None:
+                    stat_tracker[a.id]["fitness"] = None
+                else:
+                    stat_tracker[a.id]["fitness"].append(score)
+            for i in range(num_base):
+                if not fail_tracker[i]:
+                    a = base_agents[i]
+                    reg = torch.sum(torch.abs(a.input_encoder))
+                    reg = reg + torch.sum(torch.abs(a.core_model.edge.init_weight))
+                    reg = reg + torch.sum(torch.abs(a.core_model.edge.chan_map))
+                    reg = reg + torch.sum(torch.abs(a.value_decoder))
+                    reg = reg + torch.sum(torch.abs(a.policy_decoder))
+                    total_loss[i] = total_loss[i] + .0001 * reg
+                    total_loss[i].backward()
+                    for j, p in enumerate(a.parameters()):
+                        if not torch.isnan(p.grad).any():
+                            stat_tracker[a.id]["gradient"][j] += p.grad.detach()
+                        else:
+                            print("NaN grad", a.id)
+                            stat_tracker[a.id]["failure"] = True
+                            stat_tracker[a.id]["gradient"][j] += torch.zeros_like(p.grad)
+                            fail_tracker[i] = True
+                    # value_optimizers[i].step()
+                    # policy_optimizers[i].step()
+        # average and cast to numpy
+        for k in stat_tracker.keys():
+            if not stat_tracker[k]["failure"]:
+                for pid in range(len(stat_tracker[k]["gradient"])):
+                    stat_tracker[k]["gradient"][pid] *= 1e-1
+                stat_tracker[k]["value_loss"] = np.nanmean(np.array(stat_tracker[k]["value_loss"], dtype=float))
+                stat_tracker[k]["policy_loss"] = np.nanmean(np.array(stat_tracker[k]["policy_loss"], dtype=float))
+                if stat_tracker[k]["fitness"] is not None:
+                    stat_tracker[k]["fitness"] = np.mean(stat_tracker[k]["fitness"])
+        q.put((stat_tracker, reward_function, proc))
+    except Exception:
+        # on any exception we return the pid so proc can be killed
+        q.put((None, None, proc))
     return
 
