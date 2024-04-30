@@ -59,7 +59,7 @@ class WaterworldAgent:
         self.p_loss = None
 
     def clone(self, fuzzy=True):
-        new_agent = WaterworldAgent(num_nodes=self.core_model.num_nodes,
+        new_agent = type(self)(num_nodes=self.core_model.num_nodes,
                                     channels=self.channels, spatial=self.spatial,
                                     kernel=self.core_model.edge.kernel_size, sensors=self.num_sensors,
                                     action_dim=self.action_dim,
@@ -70,6 +70,7 @@ class WaterworldAgent:
             new_agent.fitness = self.fitness
             new_agent.v_loss = self.v_loss
             new_agent.p_loss = self.p_loss
+        new_agent.epsilon = self.epsilon
 
         with torch.no_grad():
             new_core = self.core_model.clone(fuzzy=fuzzy)
@@ -80,7 +81,7 @@ class WaterworldAgent:
         return new_agent
 
     def instantiate(self):
-        new_agent = WaterworldAgent(num_nodes=self.core_model.num_nodes,
+        new_agent = type(self)(num_nodes=self.core_model.num_nodes,
                                     channels=self.channels, spatial=self.spatial,
                                     kernel=self.core_model.edge.kernel_size, sensors=self.num_sensors,
                                     action_dim=self.action_dim,
@@ -90,6 +91,7 @@ class WaterworldAgent:
         new_agent.policy_decoder = self.policy_decoder.clone()
         new_agent.value_decoder = self.value_decoder.clone()
         new_agent.input_encoder = self.input_encoder.clone()
+        new_agent.epsilon = self.epsilon
         new_agent.id = self.id
         return new_agent
 
@@ -175,6 +177,39 @@ class WaterworldAgent:
         # compute next action and value estimates
         action_params = out_states[1, 0, :, :].flatten() @ self.policy_decoder
         value_est = out_states[2, 0, :, :].flatten() @ self.value_decoder
+        c1 = torch.abs(action_params[0:2]) + .001
+        c2 = torch.abs(action_params[2:]) + .001
+        return c1, c2, value_est
+
+
+class DisjointWaterWorldAgent(WaterworldAgent):
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.value_decoder = torch.empty((self.input_size, 1), device=self.device)
+        self.value_decoder = torch.nn.Parameter(torch.nn.init.xavier_normal_(self.value_decoder))
+
+    def forward(self, X, r=None):
+        """
+        :param X: Agent Sensor Data
+        :param r: instant reward form last state
+        :return: Mu, Sigma, Value - the mean and variance of the action distribution, and the state value estimate
+        """
+        # create a state matrix for injection into core from input observation
+        encoded_input = (X @ self.input_encoder).view(self.input_channels, self.spatial, self.spatial)
+        in_states = torch.zeros_like(self.core_model.states)
+        mask = in_states.bool()
+        mask[0, :self.input_channels, :, :] = True
+        # in_states[0, :self.input_channels, :, :] = .25 * in_states[0, :self.input_channels, :, :] + .75 * encoded_input
+        in_states[0, :self.input_channels, :, :] = encoded_input
+        if r is not None:
+            in_states[2, 0, :, :] = r
+        # run a model time step
+        for i in range(1):
+            out_states = self.core_model(in_states, mask)
+        # compute next action and value estimates
+        action_params = out_states[1, 0, :, :].flatten() @ self.policy_decoder
+        value_est = (X @ self.value_decoder).flatten(0) # out_states[2, 0, :, :].flatten() @ self.value_decoder
         c1 = torch.abs(action_params[0:2]) + .001
         c2 = torch.abs(action_params[2:]) + .001
         return c1, c2, value_est

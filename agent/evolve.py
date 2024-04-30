@@ -15,7 +15,7 @@ import torch
 from torch.multiprocessing import Queue, Process
 from collections import deque
 
-from agent.agents import WaterworldAgent
+from agent.agents import WaterworldAgent, DisjointWaterWorldAgent
 from agent.reward_functions import Reinforce, ActorCritic
 from agent.exist import local_evolve, episode
 from scipy.ndimage import uniform_filter1d
@@ -64,7 +64,8 @@ class _pseudo_queue(deque):
 class EvoController:
     def __init__(self, seed_agent: WaterworldAgent, epochs=10, num_base=4,
                  min_gen=10, max_gen=30, min_agents=3, max_agents=8,
-                 log_min_lr=-13., log_max_lr=-8., num_workers=6, worker_device="cpu", viz=True):
+                 log_min_lr=-13., log_max_lr=-8., num_workers=6, worker_device="cpu", viz=True,
+                 algo="a3c", start_epsilon=1.0, inverse_eps_decay=4000):
         self.num_base = num_base
         self.log_min_lr = log_min_lr
         self.log_max_lr = log_max_lr
@@ -75,10 +76,22 @@ class EvoController:
         self.max_agents = max_agents
         self.last_grad = [0. for _ in seed_agent.parameters()]
         self.viz=viz
-
-        self.reward_function = ActorCritic(gamma=.98, alpha=.007)
+        self.algo = algo
+        if algo == "a3c":
+            self.reward_function = ActorCritic(gamma=.98, alpha=.007)
+        elif algo == "reinforce":
+            self.reward_function = Reinforce(gamma=.98, alpha=.007)
+        else:
+            raise ValueError
         self.full_count = 0
-        self.epsilon = 1.
+        self.epsilon = start_epsilon
+        self.decay = -1 / inverse_eps_decay
+        if type(seed_agent) is WaterworldAgent:
+            self.disjoint_critic = False
+        elif type(seed_agent) is DisjointWaterWorldAgent:
+            self.disjoint_critic = True
+        else:
+            raise TypeError
 
         self.num_workers = num_workers
         self.sensors = seed_agent.num_sensors
@@ -96,6 +109,7 @@ class EvoController:
         if self.viz:
             # local display figure
             self.fig, self.axs = plt.subplots(3)
+            self.fig.suptitle("Loss Curves " + self.algo + " disjoint critic " + str(self.disjoint_critic))
             self.axs[0].set_ylabel("Value loss")
             self.axs[1].set_ylabel("Policy loss")
 
@@ -119,30 +133,32 @@ class EvoController:
         select_base_idx = np.random.choice(np.arange(len(self.base_agent)), size=num_agents)
         use_base_idx, copies = np.unique(select_base_idx, return_counts=True)
         use_base = []
-        for i in use_base_idx:
-            a = self.base_agent[i].clone(fuzzy=False)
-            a.epsilon = max(-(1/4000) * self.full_count + self.epsilon, .01)
-            use_base.append(self.base_agent[i].clone(fuzzy=False))
-        # use_base = [self.base_agent[i].clone(fuzzy=False) for i in use_base_idx]
-        # v_optim = [self.value_opitmizers[use_base[i].id].param_groups[0] for i in range(len(use_base))]
-        # p_optim = [self.policy_opitmizers[use_base[i].id].param_groups[0] for i in range(len(use_base))]
-        print("OPTIM:", num_gens, "generations,", num_agents, "agents of types:", [a.id for a in use_base])
-        if self.full_count < 500 or random.random() < .5:
+        local_eps = max(self.decay * self.full_count + self.epsilon, .075)
+        if self.algo == "a3c" and self.full_count < 250:
             train_critic = True
             train_actor = False
         else:
-            train_critic = False
+            train_critic = True
             train_actor = True
+        for i in use_base_idx:
+            a = self.base_agent[i].clone(fuzzy=False)
+            a.epsilon = local_eps
+            use_base.append(a)
+
+        print("OPTIM:", num_gens, "generations,", num_agents, "agents of types:", [a.id for a in use_base])
+        train_critic_random_only = not self.disjoint_critic
         if mp:
             p = Process(target=local_evolve,
-                        args=(integration_q, num_gens, use_base, copies.tolist(), self.reward_function, train_actor, train_critic, pid))
+                        args=(integration_q, num_gens, use_base, copies.tolist(), self.reward_function, train_actor,
+                              train_critic, train_critic_random_only, pid))
             return p
         else:
-            local_evolve(integration_q, num_gens, use_base, copies.tolist(), self.reward_function, train_actor, train_critic, pid)
+            local_evolve(integration_q, num_gens, use_base, copies.tolist(), self.reward_function, train_actor,
+                         train_critic, train_critic_random_only, pid)
             return None
 
     def multiclone(self, agent1: WaterworldAgent, agent2: WaterworldAgent, equal=False):
-        new_agent = WaterworldAgent(num_nodes=agent1.core_model.num_nodes,
+        new_agent = type(agent1)(num_nodes=agent1.core_model.num_nodes,
                                     channels=agent1.channels, spatial=agent1.spatial,
                                     kernel=agent1.core_model.edge.kernel_size, sensors=agent1.num_sensors,
                                     action_dim=agent1.action_dim,
@@ -178,7 +194,7 @@ class EvoController:
     def survival(self):
         # select the most fit in the overall pool.
         # all_agents = [a.clone(fuzzy=False) for a in self.base_agent]
-        kill_prob = 1 / (3.5 * self.num_workers)
+        kill_prob = 1 / (4 * self.num_workers)
         if random.random() > kill_prob:
             return
         # num_survivors = min(self.num_base - 1, math.ceil(self.num_base * .75))
@@ -255,9 +271,9 @@ class EvoController:
         if len(survivor_fitness) <= 0:
             print("No Survivor History!")
         else:
-            self.fitness_hist.append(np.max(survivor_fitness))
-            self.value_loss_hist.append(np.min(survivor_v_loss))
-            self.policy_loss_hist.append(np.min(survivor_p_loss))
+            self.fitness_hist.append(np.mean(survivor_fitness))
+            self.value_loss_hist.append(np.mean(survivor_v_loss))
+            self.policy_loss_hist.append(np.mean(survivor_p_loss))
 
         num_survivors = len(self.base_agent)
         # replace the deceased with random combinations of survivors.
@@ -265,7 +281,7 @@ class EvoController:
         for i in range(self.num_base - num_survivors):
             parent1 = random.choice(self.base_agent)
             parent2 = random.choice(self.base_agent)
-            if random.random() < .6:
+            if random.random() < 1.0:
                 child = self.multiclone(parent1, parent2, equal=True)
             else:
                 child = self.multiclone(parent1, parent2)
@@ -300,7 +316,7 @@ class EvoController:
         aid = a.id
         if aid not in self.value_opitmizers:
             value_lr = float(np.power(10, random.random() * (self.log_max_lr - self.log_min_lr) + self.log_min_lr))
-            policy_lr = float(np.power(10, random.random() * (self.log_max_lr - self.log_min_lr) + self.log_min_lr))
+            policy_lr = min(float(np.power(10, random.random() * (self.log_max_lr - self.log_min_lr) + self.log_min_lr)), value_lr)
             self.value_opitmizers[a.id] = torch.optim.Adam(a.core_model.parameters() + [a.value_decoder, a.input_encoder],
                                                            lr=value_lr)
             self.policy_opitmizers[a.id] = torch.optim.Adam(a.core_model.parameters() + [a.policy_decoder, a.input_encoder],
@@ -309,6 +325,8 @@ class EvoController:
     def spawn_visualization_worker(self, mp=True):
         # select current best base agent
         use_agent = [max(self.base_agent, key=lambda x: x.fitness)]
+        decay_by = 4000
+        use_agent[0].epsilon = max(-(1/decay_by) * self.full_count + 1.0, .01)
         copies = [1]
         if mp:
             p = Process(target=episode, args=(use_agent, copies, 400, 400, 20, True, "cpu"))
@@ -329,7 +347,8 @@ class EvoController:
                    "fit_hist": self.fitness_hist,
                    "val_hist": self.value_loss_hist,
                    "p_hist": self.policy_loss_hist,
-                   "r_fxn": self.reward_function}
+                   "r_fxn": self.reward_function,
+                   "count": self.full_count}
         fname = os.path.join(fbase, "snap_" + str(iter) + "_" + str(v) + "_.pkl")
         with open(fname, "wb") as file:
             pickle.dump(package, file)
@@ -345,6 +364,7 @@ class EvoController:
         self.policy_loss_hist = p["p_hist"]
         try:
             rf = p["r_fxn"]
+            self.full_count = p["count"]
             # don't directly assign so we can change rfs
             self.reward_function.count = rf.count
             self.reward_function.mean = rf.mean
@@ -370,16 +390,9 @@ class EvoController:
                     workers[k].join()
                     workers.pop(k)
                 to_kill = set()
-                # for k in workers.keys():
-                #     if not workers[k].is_alive():
-                #         print("Killing worker", k)
-                #         workers[k].join()
-                #         to_remove.append(k)
-                # for k in to_remove:
-                #     workers.pop(k)
                 if len(workers) < num_workers and epoch <= self.epochs:
                     pid = "".join(random.choices("ABCDEFG1234567", k=5))
-                    if (epoch + 1) % disp_iter == 0:
+                    if (epoch) % disp_iter == 0:
                         print("Episode Display Worker", pid)
                         if epoch != 0:
                             self.save_model(epoch, fbase)
@@ -387,8 +400,8 @@ class EvoController:
                     else:
                         print("Worker", pid, "handling epoch", epoch)
                         p = self.spawn_worker(integration_q, pid)
-                    workers[pid] = p
-                    p.start()
+                        workers[pid] = p
+                        p.start()
                     epoch += 1
                     self.full_count += 1
             else:
@@ -397,6 +410,7 @@ class EvoController:
                 else:
                     self.spawn_worker(integration_q, 0, mp=False)
                 epoch += 1
+                self.full_count += 1
             if not integration_q.empty():
                 stats, rf, pid = integration_q.get(block=True)  # , v_optims, p_optims
                 to_kill.add(pid)
@@ -410,12 +424,7 @@ class EvoController:
         for k in workers.keys():
             workers[k].join()
         print("DONE: one last visualization...")
-        # save models
-        for a in self.base_agent:
-            name = a.id
-            fitness = round(a.fitness, 2)
-            with open("../models/" + name + "_" + str(a.core_model.num_nodes) + "_" + str(fitness) + ".pkl", "wb") as f:
-                pickle.dump(a.detach(), f)
+
         if self.viz:
             self.visualize()
             self.spawn_visualization_worker(mp=False)
@@ -426,9 +435,9 @@ class EvoController:
         self.axs[0].cla()
         self.axs[1].cla()
         self.axs[2].cla()
-        self.axs[0].plot(np.log2(uniform_filter1d(np.array(self.value_loss_hist), size=self.num_workers)))
-        self.axs[1].plot(uniform_filter1d(np.array(self.policy_loss_hist), size=self.num_workers))
-        self.axs[2].plot(uniform_filter1d(np.array(self.fitness_hist), size=self.num_workers))
+        self.axs[0].plot(np.log2(uniform_filter1d(np.array(self.value_loss_hist), size=5 * self.num_workers)))
+        self.axs[1].plot(uniform_filter1d(np.array(self.policy_loss_hist), size=5 * self.num_workers))
+        self.axs[2].plot(uniform_filter1d(np.array(self.fitness_hist), size=5 * self.num_workers))
         mypause(.05)
 
 
