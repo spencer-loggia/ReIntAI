@@ -78,9 +78,9 @@ class EvoController:
         self.viz=viz
         self.algo = algo
         if algo == "a3c":
-            self.reward_function = ActorCritic(gamma=.98, alpha=.007)
+            self.reward_function = ActorCritic(gamma=.98, alpha=.25)
         elif algo == "reinforce":
-            self.reward_function = Reinforce(gamma=.98, alpha=.007)
+            self.reward_function = Reinforce(gamma=.98, alpha=.25)
         else:
             raise ValueError
         self.full_count = 0
@@ -133,17 +133,21 @@ class EvoController:
         select_base_idx = np.random.choice(np.arange(len(self.base_agent)), size=num_agents)
         use_base_idx, copies = np.unique(select_base_idx, return_counts=True)
         use_base = []
-        local_eps = max(self.decay * self.full_count + self.epsilon, .075)
-        if self.algo == "a3c" and self.full_count < 250:
+        local_eps = max(self.decay * self.full_count + self.epsilon, .05)
+        for i in use_base_idx:
+            a = self.base_agent[i].clone(fuzzy=False)
+            if random.random() < .1:
+                a.epsilon = 1.0
+            else:
+                a.epsilon = local_eps
+            use_base.append(a)
+        if self.algo == "a3c" and (self.full_count < 250):
             train_critic = True
             train_actor = False
         else:
             train_critic = True
             train_actor = True
-        for i in use_base_idx:
-            a = self.base_agent[i].clone(fuzzy=False)
-            a.epsilon = local_eps
-            use_base.append(a)
+
 
         print("OPTIM:", num_gens, "generations,", num_agents, "agents of types:", [a.id for a in use_base])
         train_critic_random_only = not self.disjoint_critic
@@ -255,7 +259,7 @@ class EvoController:
             self.policy_opitmizers[id].zero_grad()
             grads = stats[id]["gradient"]
             for j, g in enumerate(grads):
-                self.last_grad[j] = g
+                self.last_grad[j] = .7 * self.last_grad[j] + .3 * g
             self.base_agent[i].set_grad(self.last_grad)  # sets parameter gradient attributes
             before_plast = self.base_agent[i].core_model.edge.chan_map.detach().clone()
             self.value_opitmizers[id].step()
@@ -288,8 +292,6 @@ class EvoController:
             child.epsilon = random.random() * .1
             if self.evo_tree.has_node(child.id):
                 self.evo_tree.remove_node(child.id)
-            # v_optim[child.id] = v_optim[parent1.id]
-            # p_optim[child.id] = p_optim[parent1.id]
             for p in [parent1, parent2]:
                 hist_size = len(self.evo_tree.nodes[parent1.id]["fitness"])
                 # adjust weight by number of copies used
@@ -315,10 +317,14 @@ class EvoController:
     def _add_optimizer_set(self, a):
         aid = a.id
         if aid not in self.value_opitmizers:
-            value_lr = float(np.power(10, random.random() * (self.log_max_lr - self.log_min_lr) + self.log_min_lr))
-            policy_lr = min(float(np.power(10, random.random() * (self.log_max_lr - self.log_min_lr) + self.log_min_lr)), value_lr)
-            self.value_opitmizers[a.id] = torch.optim.Adam(a.core_model.parameters() + [a.value_decoder, a.input_encoder],
-                                                           lr=value_lr)
+            lr = float(np.power(10, random.random() * (self.log_max_lr - self.log_min_lr) + self.log_min_lr))
+            value_lr = lr
+            policy_lr = lr
+            if self.disjoint_critic:
+                self.value_opitmizers[a.id] = torch.optim.Adam([a.value_decoder, a.input_encoder], lr=.8 * value_lr)
+            else:
+                self.value_opitmizers[a.id] = torch.optim.Adam(a.core_model.parameters() + [a.value_decoder, a.input_encoder],
+                                                               lr=value_lr)
             self.policy_opitmizers[a.id] = torch.optim.Adam(a.core_model.parameters() + [a.policy_decoder, a.input_encoder],
                                                             lr=policy_lr)
 
@@ -364,6 +370,7 @@ class EvoController:
         self.policy_loss_hist = p["p_hist"]
         try:
             rf = p["r_fxn"]
+            rf.alpha = .01
             self.full_count = p["count"]
             # don't directly assign so we can change rfs
             self.reward_function.count = rf.count

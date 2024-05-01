@@ -1,10 +1,7 @@
-
 import matplotlib
 matplotlib.use('Qt5Agg')
 
-import numpy as np
 import torch
-import torch.nn.functional as F
 
 
 def return_from_reward(rewards, gamma):

@@ -171,9 +171,9 @@ def local_evolve(q, generations, base_agents, copies, reward_function, train_act
                         stat_tracker[agent_info["base_name"]]["failure"] = True
                         fail_tracker[agent_info["base_index"]] = True
                     stat_tracker[agent_info["base_name"]]["value_loss"][-1].append((val_loss / torch.count_nonzero(is_random)).detach().cpu().item())
-                    stat_tracker[agent_info["base_name"]]["policy_loss"][-1].append(policy_loss.mean().detach().cpu().item())
+                    stat_tracker[agent_info["base_name"]]["policy_loss"][-1].append((policy_loss / len(is_random)).detach().cpu().item())
                     stat_tracker[agent_info["base_name"]]["copies"] += weight
-                    a = .05
+                    a = .03
                     b = .05
                     if train_act:
                         a = 0.0
@@ -208,7 +208,7 @@ def local_evolve(q, generations, base_agents, copies, reward_function, train_act
                         reg = reg + torch.sum(torch.abs(a.value_decoder))
                     if train_act:
                         reg = reg + torch.sum(torch.abs(a.policy_decoder))
-                    total_loss[i] = total_loss[i] + .001 * reg
+                    total_loss[i] = total_loss[i] + .0001 * reg
                     total_loss[i].backward()
                     for j, p in enumerate(a.parameters()):
                         if not torch.isnan(p.grad).any():

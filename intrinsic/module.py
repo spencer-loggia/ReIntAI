@@ -39,7 +39,7 @@ class PlasticEdges():
         # initial weight parameter
         self.init_weight = torch.zeros((num_nodes, num_nodes,
                                    1, 1,
-                                   1, 1, self.kernel_size, self.kernel_size),
+                                   self.channels, self.channels, self.kernel_size, self.kernel_size),
                                    device=device)  # 8D Tensor.
         self.init_weight = torch.nn.init.xavier_normal_(self.init_weight * .1)
         if optimize_weights:
@@ -230,9 +230,6 @@ class PlasticEdges():
             s1 = float(self.init_weight.std()) * (.5 * random.random() + .1)
             s2 = float(self.chan_map.std()) * (.5 * random.random() + .1)
             s3 = float(self.plasticity.std()) * (.5 * random.random() + .1)
-            # m1 = .0 * (random.random() - .5) * s1
-            # m2 = .01 * (random.random() - .5) * s2
-            # m3 = .01 * (random.random() - .5) * s3
             m1 = m2 = m3 = 0.
         else:
             s1 = s2 = s3 = m1 = m2 = m3 = 0.
@@ -240,6 +237,7 @@ class PlasticEdges():
         instance.init_weight = torch.nn.Parameter(self.init_weight.detach().clone() + torch.normal(size=self.init_weight.shape,
                                                                        mean=m1,
                                                                        std=s1))
+
         instance.weight = instance._expand_base_weights(instance.init_weight)
         instance.chan_map = torch.nn.Parameter(self.chan_map.detach().clone() + torch.normal(size=self.chan_map.shape,
                                                                  mean=m2,
