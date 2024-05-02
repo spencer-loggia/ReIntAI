@@ -66,7 +66,10 @@ class PlasticEdges():
 
     def _expand_base_weights(self, in_weight):
         # adds explicit spatial dims to weights
-        if self.init_weight.shape[4] == 1:
+        if len(self.init_weight.shape) == 1:
+            expanded_weights = torch.ones((self.num_nodes, self.num_nodes, self.spatial1, self.spatial2, self.channels,
+                                           self.channels, self.kernel_size, self.kernel_size)) * self.init_weight.clone()
+        elif self.init_weight.shape[4] == 1:
             expanded_weights = torch.sigmoid(torch.tile(in_weight.clone(), (1, 1, self.spatial1, self.spatial2, self.channels, self.channels, 1, 1)))
         else:
             expanded_weights = torch.sigmoid(torch.tile(in_weight.clone(), (1, 1, self.spatial1, self.spatial2, 1, 1, 1, 1)))

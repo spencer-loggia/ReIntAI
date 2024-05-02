@@ -37,8 +37,9 @@ def l2l_loss(logits, targets, lfxn, classes=3, power=2, window=3):
 
 class Decoder:
 
-    def __init__(self,  train_labels=(3, 7), device="cpu"):
+    def __init__(self,  train_labels=(3, 7), device="cpu", train_init=False):
         self.model = Intrinsic(num_nodes=5, node_shape=(1, 3, 9, 9), kernel_size=6, input_mode="overwrite", device=device)
+        self.model.init_weight = torch.nn.Parameter(torch.tensor([.1], device=device))
         self.train_labels = train_labels
         self.device = device
         self.internal_feedback_loss = torch.nn.BCELoss()
