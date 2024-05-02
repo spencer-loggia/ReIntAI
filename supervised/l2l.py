@@ -50,7 +50,7 @@ class Decoder:
             raise ValueError("implemented for binary case only")
         else:
             # is binary
-            self.decoder = torch.nn.Linear(in_features=9 ** 2, out_features=1, device=device)
+            self.decoder = torch.nn.Linear(in_features=28*28, out_features=1, device=device)
         self.optim = torch.optim.Adam(params=[self.model.resistance,
                                               self.model.edge.init_weight,
                                               self.model.edge.plasticity,
