@@ -4,7 +4,10 @@ from torchvision.transforms import PILToTensor
 from torch.utils.data import DataLoader
 from intrinsic.model import Intrinsic
 from sklearn.metrics import roc_curve, RocCurveDisplay
+import matplotlib
 from matplotlib import pyplot as plt
+matplotlib.use('Qt5Agg')
+
 import numpy as np
 import pickle
 
@@ -16,7 +19,8 @@ def l2l_loss(logits, targets, lfxn, classes=3, power=2, window=3):
     :param power: higher powers encourage larger step changes
     :return:
     """
-    targets = torch.Tensor(targets).float()
+    device = logits.device
+    targets = torch.tensor(targets, device=device).float()
     conv_1d = torch.nn.Conv1d(in_channels=1, out_channels=1, kernel_size=window, padding=1, padding_mode="replicate")
     conv_1d.weight = torch.nn.Parameter(torch.ones_like(conv_1d.weight) / window)
     conv_1d.bias = torch.nn.Parameter(torch.zeros_like(conv_1d.bias))
@@ -33,15 +37,16 @@ def l2l_loss(logits, targets, lfxn, classes=3, power=2, window=3):
 
 class Decoder:
 
-    def __init__(self,  train_labels=(3, 7)):
-        self.model = Intrinsic(num_nodes=5, node_shape=(1, 3, 9, 9), kernel_size=6, input_mode="overwrite")
+    def __init__(self,  train_labels=(3, 7), device="cpu"):
+        self.model = Intrinsic(num_nodes=5, node_shape=(1, 3, 9, 9), kernel_size=6, input_mode="overwrite", device=device)
         self.train_labels = train_labels
+        self.device = device
         self.internal_feedback_loss = torch.nn.BCELoss()
         if len(self.train_labels) > 2:
             raise ValueError("implemented for binary case only")
         else:
             # is binary
-            self.decoder = torch.nn.Linear(in_features=9 ** 2, out_features=1)
+            self.decoder = torch.nn.Linear(in_features=9 ** 2, out_features=1, device=device)
         self.optim = torch.optim.Adam(params=[self.model.resistance,
                                               self.model.edge.init_weight,
                                               self.model.edge.plasticity,
@@ -88,7 +93,7 @@ class Decoder:
             all_logits.append(logits.clone())
             all_labels.append(label)
             count += 1
-        return torch.stack(all_logits, dim=0), torch.Tensor(all_labels).float()
+        return torch.stack(all_logits, dim=0), torch.tensor(all_labels, device=self.device).float()
 
     def l2l_fit(self, data, epochs=1000, batch_size=100, loss_mode="ce", reset_epochs=10):
         l_fxn = torch.nn.BCELoss(reduce=False)
@@ -138,7 +143,7 @@ class Decoder:
         data = DataLoader(data, shuffle=True, batch_size=1)
         with torch.no_grad():
             logits, labels = self._fit(data, use_labels, iter)
-        labels = torch.Tensor(labels).float().flatten()
+        labels = torch.tensor(labels, device=self.device).float().flatten()
         probs = torch.sigmoid(logits).flatten()
         avg_loss = l_fxn(probs, labels)
         preds = torch.round(probs)
@@ -148,60 +153,12 @@ class Decoder:
         labels = labels.detach().cpu().numpy()
         return acc, probs, labels
 
+    def to(self, device):
+        self.device = device
+        self.decoder = self.decoder.to(device)
+        self.model = self.model.to(device)
+        return self
 
-if __name__=="__main__":
-    FIT = True
-    ITER = 2
-    EVAL_ITER = 3
-    load = None
-
-    try:
-        dataset = MNIST(root="/Users/loggiasr/Projects/ReIntAI/tmp", transform=PILToTensor())
-    except RuntimeError:
-        dataset = MNIST(root="/Users/loggiasr/Projects/ReIntAI/tmp", download=True, transform=PILToTensor())
-
-    if load is not None:
-        with open(load, "rb") as f:
-            decoder = pickle.load(f)
-    else:
-        decoder = Decoder(train_labels=(3, 7))
-
-    if FIT:
-        # train on set of examples:
-        decoder.l2l_fit(dataset, ITER, batch_size=20, loss_mode="ce")
-        decoder.l2l_fit(dataset, ITER // 2, batch_size=20, loss_mode="both")
-        decoder.l2l_fit(dataset, ITER, batch_size=20, loss_mode="l2l")
-
-    train_fig, train_ax = plt.subplots(1)
-    train_fig.suptitle("Train Set ROC")
-    test_fig, test_ax = plt.subplots(1)
-    test_fig.suptitle("Train Set ROC")
-
-    # how do we do on train set
-    decoder.forward_fit(dataset, EVAL_ITER)
-    acc, probs, labels = decoder.evaluate(dataset, EVAL_ITER)
-    print("INSET", acc)
-    RocCurveDisplay.from_predictions(labels, probs, ax=train_ax)
-
-    # how do we do on train set with reversed labels
-    decoder.forward_fit(dataset, EVAL_ITER, (7, 3))
-    acc, probs, labels = decoder.evaluate(dataset, EVAL_ITER, (7, 3))
-    print("FLIPPED L2L", acc)
-    RocCurveDisplay.from_predictions(labels, probs, ax=train_ax)
-
-    # how do we do on different set
-    decoder.forward_fit(dataset, EVAL_ITER, (1, 8))
-    acc, probs, labels = decoder.evaluate(dataset, EVAL_ITER, (1, 8))
-    print("CROSS SET L2L", acc)
-    RocCurveDisplay.from_predictions(labels, probs, ax=test_ax)
-
-    # how do we do on different set (flipped labels)
-    decoder.forward_fit(dataset, EVAL_ITER, (8, 1))
-    acc, probs, labels = decoder.evaluate(dataset, EVAL_ITER, (8, 1))
-    print("CROSS SET L2L", acc)
-    RocCurveDisplay.from_predictions(labels, probs, ax=test_ax)
-
-    plt.show()
 
 
 
