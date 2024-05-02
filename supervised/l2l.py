@@ -50,7 +50,7 @@ class Decoder:
         self.optim = torch.optim.Adam(params=[self.model.resistance,
                                               self.model.edge.init_weight,
                                               self.model.edge.plasticity,
-                                              self.model.edge.chan_map] + list(self.decoder.parameters()), lr=1e-5)
+                                              self.model.edge.chan_map] + list(self.decoder.parameters()), lr=1e-4)
 
         self.history = []
 
