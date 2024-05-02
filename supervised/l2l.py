@@ -20,7 +20,7 @@ def l2l_loss(logits, targets, lfxn, classes=3, power=2, window=3):
     :return:
     """
     device = logits.device
-    targets = torch.tensor(targets, device=device).float()
+    targets = targets.float()
     conv_1d = torch.nn.Conv1d(in_channels=1, out_channels=1, kernel_size=window, padding=1,
                               padding_mode="replicate", device=device)
     conv_1d.weight = torch.nn.Parameter(torch.ones_like(conv_1d.weight) / window)
@@ -98,7 +98,7 @@ class Decoder:
         return torch.stack(all_logits, dim=0), torch.tensor(all_labels, device=self.device).float()
 
     def l2l_fit(self, data, epochs=1000, batch_size=100, loss_mode="ce", reset_epochs=10):
-        l_fxn = torch.nn.BCELoss(reduce=False)
+        l_fxn = torch.nn.BCEWithLogitsLoss(reduce=False)
         data = DataLoader(data, shuffle=True, batch_size=1)
         for epoch in range(epochs):
             self.optim.zero_grad()
@@ -107,14 +107,14 @@ class Decoder:
             else:
                 self.model.detach(reset_intrinsic=False)
             logits, labels = self._fit(data, self.train_labels, batch_size)
+            logits = logits.flatten()
             # loss = torch.sum(logits)
-            prob = torch.sigmoid(logits).flatten()
             if loss_mode == "ce":
-                loss = torch.mean(l_fxn(prob, labels))
+                loss = torch.mean(l_fxn(logits, labels))
             elif loss_mode == "l2l":
-                loss = l2l_loss(prob, labels, l_fxn)
+                loss = l2l_loss(logits, labels, l_fxn)
             elif loss_mode == "both":
-                loss = .5 * l2l_loss(prob, labels, l_fxn) + .5 * torch.mean(l_fxn(prob, labels)) #
+                loss = .5 * l2l_loss(logits, labels, l_fxn) + .5 * torch.mean(l_fxn(logits, labels)) #
             else:
                 raise ValueError
             reg = torch.sum(torch.pow(self.model.edge.chan_map, 2)) + torch.sum(torch.abs(self.model.edge.plasticity))
@@ -141,13 +141,13 @@ class Decoder:
     def evaluate(self, data, iter, use_labels=None):
         if use_labels is None:
             use_labels = self.train_labels
-        l_fxn = torch.nn.BCELoss()
+        l_fxn = torch.nn.BCEWithLogitsLoss()
         data = DataLoader(data, shuffle=True, batch_size=1)
         with torch.no_grad():
             logits, labels = self._fit(data, use_labels, iter)
         labels = torch.tensor(labels, device=self.device).float().flatten()
         probs = torch.sigmoid(logits).flatten()
-        avg_loss = l_fxn(probs, labels)
+        avg_loss = l_fxn(logits.flatten(), labels)
         preds = torch.round(probs)
         acc = torch.count_nonzero(preds == labels) / len(labels)
         print(iter, "Iterations, avg CE:", avg_loss.detach().item(), "acc:", acc.detach().item())
