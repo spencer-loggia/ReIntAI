@@ -269,7 +269,7 @@ class PlasticEdges():
 
 class FCPlasticEdges():
     def __init__(self, num_nodes, spatial, channels, device='cpu', mask=None, optimize_weights=True, debug=False,
-                 **kwargs):
+                 *args, **kwargs):
         """
         Designed to operate on a (n, c, s, s) intrinsic graph. Defines a convolutional edge with a Hebbian-like
         local update function between each node and each channel on the graph.
@@ -316,6 +316,7 @@ class FCPlasticEdges():
             torch.ones((num_nodes, num_nodes, channels, channels), device=device) * init_plasticity)
         self.device = device
         self.debug = debug
+        self.kernel_size = None
 
     def _expand_base_weights(self, in_weight):
         # adds explicit spatial dims to weights
@@ -370,7 +371,7 @@ class FCPlasticEdges():
         combined_weight_mult = torch.permute(combined_weight, (0, 2, 4, 1, 3, 5))  # u, in_s, in_c, v, out_s, out_c
         combined_weight_mult = combined_weight_mult.reshape(
             (self.num_nodes * self.spatial * self.channels, self.num_nodes * self.spatial * self.channels))
-        out = xufld @ combined_weight_mult  # node, spatial, channel
+        out = xufld.flatten() @ combined_weight_mult  # node, spatial, channel
         out = out.view((self.num_nodes, self.spatial, self.channels)).transpose(1, 2)  # n, c, s
         return out
 
@@ -390,7 +391,7 @@ class FCPlasticEdges():
             return
 
         # reverse the channel mapping so source channels receive information about their targets
-        target_activations = target_activation.view(self.num_nodes * self.channels,
+        target_activations = target_activation.reshape(self.num_nodes * self.channels,
                                                     self.spatial, 1).transpose(0, 1)  # (_, s, nc)
 
         chan_map = self.chan_map.permute((0, 2, 1, 3)).reshape(

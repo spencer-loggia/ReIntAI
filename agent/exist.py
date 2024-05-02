@@ -173,7 +173,7 @@ def local_evolve(q, generations, base_agents, copies, reward_function, train_act
                     stat_tracker[agent_info["base_name"]]["value_loss"][-1].append((val_loss / torch.count_nonzero(is_random)).detach().cpu().item())
                     stat_tracker[agent_info["base_name"]]["policy_loss"][-1].append((policy_loss / len(is_random)).detach().cpu().item())
                     stat_tracker[agent_info["base_name"]]["copies"] += weight
-                    a = .03
+                    a = .01
                     b = .05
                     if train_act:
                         a = 0.0

@@ -13,6 +13,8 @@ def conv_identity_params(in_spatial, desired_kernel, stride=1):
     """
     if desired_kernel == 1:
         return 1, 0
+    if desired_kernel is None:
+        return 1, 0
     pad = .1
     in_spatial /= stride
     kernel = min(desired_kernel, in_spatial)

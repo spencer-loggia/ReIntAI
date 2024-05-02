@@ -15,7 +15,7 @@ import torch
 from torch.multiprocessing import Queue, Process
 from collections import deque
 
-from agent.agents import WaterworldAgent, DisjointWaterWorldAgent
+from agent.agents import WaterworldAgent, DisjointWaterWorldAgent, FCWaterworldAgent
 from agent.reward_functions import Reinforce, ActorCritic
 from agent.exist import local_evolve, episode
 from scipy.ndimage import uniform_filter1d
@@ -62,7 +62,7 @@ class _pseudo_queue(deque):
 
 
 class EvoController:
-    def __init__(self, seed_agent: WaterworldAgent, epochs=10, num_base=4,
+    def __init__(self, seed_agent, epochs=10, num_base=4,
                  min_gen=10, max_gen=30, min_agents=3, max_agents=8,
                  log_min_lr=-13., log_max_lr=-8., num_workers=6, worker_device="cpu", viz=True,
                  algo="a3c", start_epsilon=1.0, inverse_eps_decay=4000):
@@ -85,12 +85,11 @@ class EvoController:
         self.full_count = 0
         self.epsilon = start_epsilon
         self.decay = -1 / inverse_eps_decay
-        if type(seed_agent) is WaterworldAgent:
-            self.disjoint_critic = False
-        elif type(seed_agent) is DisjointWaterWorldAgent:
+        if type(seed_agent) is DisjointWaterWorldAgent:
             self.disjoint_critic = True
         else:
-            raise TypeError
+            self.disjoint_critic = False
+        self.agent_class = type(seed_agent)
 
         self.num_workers = num_workers
         self.sensors = seed_agent.num_sensors
@@ -154,8 +153,8 @@ class EvoController:
                          train_critic, train_critic_random_only, pid)
             return None
 
-    def multiclone(self, agent1: WaterworldAgent, agent2: WaterworldAgent, equal=False):
-        new_agent = type(agent1)(num_nodes=agent1.core_model.num_nodes,
+    def multiclone(self, agent1, agent2, equal=False):
+        new_agent = self.agent_class(num_nodes=agent1.core_model.num_nodes,
                                     channels=agent1.channels, spatial=agent1.spatial,
                                     kernel=agent1.core_model.edge.kernel_size, sensors=agent1.num_sensors,
                                     action_dim=agent1.action_dim,
@@ -199,7 +198,7 @@ class EvoController:
 
         print("Agent pool")
 
-        def _val(a: WaterworldAgent):
+        def _val(a):
             aid = a.id
             version = a.version
             all_ = self.evo_tree.nodes[aid]["fitness"]
@@ -385,7 +384,7 @@ class EvoController:
                 to_kill = set()
                 if len(workers) < num_workers and epoch <= self.epochs:
                     pid = "".join(random.choices("ABCDEFG1234567", k=5))
-                    if (epoch) % disp_iter == 0:
+                    if (epoch + 1) % disp_iter == 0:
                         print("Episode Display Worker", pid)
                         if epoch != 0:
                             self.save_model(epoch, fbase)
