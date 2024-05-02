@@ -119,14 +119,20 @@ class Intrinsic():
         penalty = torch.sum(torch.stack([torch.sum(torch.abs(p)) for p in ps]))
         return penalty
 
-    def clone(self, fuzzy=False):
+    def clone(self, fuzzy=False, device=None):
+        if device is None:
+            device = self.device
         new_model = Intrinsic(self.num_nodes, (1, self.edge.channels, self.edge.spatial1, self.edge.spatial2),
-                              inject_noise=self.inject_noise, edge_module=PlasticEdges, device=self.device,
+                              inject_noise=self.inject_noise, edge_module=PlasticEdges, device=device,
                               track_activation_history=self.past_states is not None, mask=self.edge.mask,
                               kernel_size=self.edge.kernel_size, is_resistive=self.resistive,
                               input_mode=self.input_mode,
                               optimize_weights=self.edge.optimize_weights)
-        new_model.states = self.states.detach()
-        new_model.edge = self.edge.clone(fuzzy=fuzzy)
-        new_model.resistance = torch.nn.Parameter(self.resistance.detach().clone())
+        new_model.states = self.states.detach().to(device)
+        new_model.edge = self.edge.clone(fuzzy=fuzzy).to(device)
+        new_model.resistance = torch.nn.Parameter(self.resistance.detach().clone().to(device))
         return new_model
+
+    def to(self, device):
+        self.device = device
+        return self.clone(fuzzy=False, device=device)
