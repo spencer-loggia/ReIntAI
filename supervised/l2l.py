@@ -1,3 +1,5 @@
+import random
+
 import torch
 from torchvision.datasets.mnist import MNIST
 from torchvision.transforms import PILToTensor
@@ -103,6 +105,7 @@ class Decoder:
         for epoch in range(epochs):
             self.optim.zero_grad()
             if (reset_epochs % 10) == 0:
+                self.train_labels = reversed(self.train_labels)
                 self.model.detach(reset_intrinsic=True)
             else:
                 self.model.detach(reset_intrinsic=False)
