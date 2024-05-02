@@ -21,7 +21,8 @@ def l2l_loss(logits, targets, lfxn, classes=3, power=2, window=3):
     """
     device = logits.device
     targets = torch.tensor(targets, device=device).float()
-    conv_1d = torch.nn.Conv1d(in_channels=1, out_channels=1, kernel_size=window, padding=1, padding_mode="replicate")
+    conv_1d = torch.nn.Conv1d(in_channels=1, out_channels=1, kernel_size=window, padding=1,
+                              padding_mode="replicate", device=device)
     conv_1d.weight = torch.nn.Parameter(torch.ones_like(conv_1d.weight) / window)
     conv_1d.bias = torch.nn.Parameter(torch.zeros_like(conv_1d.bias))
     ce_loss = lfxn(logits, targets).view((-1,)) #
