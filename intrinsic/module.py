@@ -239,13 +239,13 @@ class PlasticEdges():
 
         instance.init_weight = torch.nn.Parameter(self.init_weight.detach().clone() + torch.normal(size=self.init_weight.shape,
                                                                        mean=m1,
-                                                                       std=s1))
+                                                                       std=s1, device=self.device))
 
         instance.weight = instance._expand_base_weights(instance.init_weight)
         instance.chan_map = torch.nn.Parameter(self.chan_map.detach().clone() + torch.normal(size=self.chan_map.shape,
                                                                  mean=m2,
-                                                                 std=s2))
+                                                                 std=s2, device=self.device))
         instance.plasticity = torch.nn.Parameter(self.plasticity.detach().clone() + torch.normal(size=self.chan_map.shape,
                                                                      mean=m3,
-                                                                     std=s3))
+                                                                     std=s3, device=self.device))
         return instance
