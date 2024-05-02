@@ -41,7 +41,7 @@ def l2l_loss(logits, targets, lfxn, classes=3, power=2, window=3):
 class Decoder:
 
     def __init__(self,  train_labels=(3, 7), device="cpu", train_init=False, lr=1e-5):
-        self.model = FCIntrinsic(num_nodes=5, node_shape=(1, 3, 28*28), kernel_size=6, input_mode="overwrite", device=device)
+        self.model = FCIntrinsic(num_nodes=5, node_shape=(1, 3, 14*14), kernel_size=None, input_mode="overwrite", device=device)
         self.model.init_weight = torch.nn.Parameter(torch.tensor([.1], device=device))
         self.train_labels = train_labels
         self.device = device
@@ -50,7 +50,7 @@ class Decoder:
             raise ValueError("implemented for binary case only")
         else:
             # is binary
-            self.decoder = torch.nn.Linear(in_features=28*28, out_features=1, device=device)
+            self.decoder = torch.nn.Linear(in_features=14*14, out_features=1, device=device)
         self.optim = torch.optim.Adam(params=[self.model.resistance,
                                               self.model.edge.init_weight,
                                               self.model.edge.plasticity,
@@ -59,9 +59,9 @@ class Decoder:
         self.history = []
 
     def forward(self, X, y):
-        pool = torch.nn.MaxPool2d(3)
+        pool = torch.nn.MaxPool2d(2)
         img = X.float()
-        img = img.reshape((1, 1, -1)).squeeze()
+        img = pool(img.reshape((1, 1, -1))).squeeze()
         img = (img - img.mean()) / img.std()
         in_states = torch.zeros_like(self.model.states)
         mask = in_states.bool()
