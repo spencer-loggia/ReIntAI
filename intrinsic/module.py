@@ -34,7 +34,7 @@ class PlasticEdges():
         # mask has shape (nodes, nodes) and allows us to predefine a graph structure besides fully connected.
         if mask is None:
             mask = torch.ones((num_nodes, num_nodes), device=device)
-        self.mask = mask.to(self.device)
+        self.mask = mask.to(device)
 
         # initial weight parameter
         self.init_weight = torch.zeros((num_nodes, num_nodes,
@@ -222,6 +222,7 @@ class PlasticEdges():
         self.weight = self.weight.to(device)
         self.chan_map = torch.nn.Parameter(self.chan_map.to(device))
         self.plasticity = torch.nn.Parameter(self.plasticity.to(device))
+        self.mask = self.mask.to(device)
         self.device = device
         return self
 
