@@ -59,7 +59,7 @@ class Decoder:
         self.history = []
 
     def forward(self, X, y):
-        pool = torch.nn.MaxPool1d(2)
+        pool = torch.nn.MaxPool2d(2)
         img = X.float()
         img = pool(img.reshape((1, 1, img.shape[-1], -1))).flatten()
         img = (img - img.mean()) / img.std()
