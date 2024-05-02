@@ -65,7 +65,7 @@ class Decoder:
         img = (img - img.mean()) / img.std()
         in_states = torch.zeros_like(self.model.states)
         mask = in_states.bool()
-        for i in range(3):
+        for i in range(1):
             with torch.no_grad():
                 in_states[0, 0, :] = img.detach()
                 mask[0, 0, :] = True
@@ -104,10 +104,10 @@ class Decoder:
         data = DataLoader(data, shuffle=True, batch_size=1)
         for epoch in range(epochs):
             self.optim.zero_grad()
-            if (reset_epochs % 10) == 0:
-                self.train_labels = list(reversed(self.train_labels))
+            if (reset_epochs % 20) == 0:
                 self.model.detach(reset_intrinsic=True)
             else:
+                self.train_labels = list(reversed(self.train_labels))
                 self.model.detach(reset_intrinsic=False)
             logits, labels = self._fit(data, self.train_labels, batch_size)
             logits = logits.flatten()
