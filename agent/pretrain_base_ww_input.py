@@ -44,7 +44,7 @@ if __name__=="__main__":
     shuffle_indexes = np.random.choice(np.arange(len(observations)), size=len(observations), replace=False).astype(int)
     observations = observations[shuffle_indexes]
     returns = np.concatenate(all_returns)[shuffle_indexes]
-    returns = returns - returns.mean()
-    returns = returns / returns.std()
+    # returns = returns - returns.mean()
+    # returns = returns / returns.std()
     np.savetxt(os.path.join(out_file, "obs_data.txt"), observations)
     np.savetxt(os.path.join(out_file, "returns.txt"), returns)

@@ -74,13 +74,12 @@ class EvoController:
         self.max_gen = max_gen
         self.min_agents = min_agents
         self.max_agents = max_agents
-        self.last_grad = [0. for _ in seed_agent.parameters()]
         self.viz=viz
         self.algo = algo
         if algo == "a3c":
-            self.reward_function = ActorCritic(gamma=.98, alpha=.25)
+            self.reward_function = ActorCritic(gamma=.9, alpha=.25)
         elif algo == "reinforce":
-            self.reward_function = Reinforce(gamma=.98, alpha=.25)
+            self.reward_function = Reinforce(gamma=.9, alpha=.25)
         else:
             raise ValueError
         self.full_count = 0
@@ -96,8 +95,8 @@ class EvoController:
         self.num_workers = num_workers
         self.sensors = seed_agent.num_sensors
         self.base_agent = [seed_agent.clone(fuzzy=False)]
-        self.value_opitmizers = {}
-        self.policy_opitmizers = {}
+        self.optimizers = {}
+        self.last_grad = {seed_agent.id: [0. for _ in seed_agent.parameters()]}
         self.worker_device = worker_device
         self.num_integrations = 0
         self.evo_tree = networkx.DiGraph()
@@ -119,12 +118,6 @@ class EvoController:
             self.axs[2].set_ylim((-.05, .2))
             plt.show()
 
-        # self.global_fig.suptitle("Overall Loss Progress")
-
-        # tree display figure
-        # self.tree_fig, self.tree_axs = plt.subplots(1)
-        # self.tree_fig.suptitle("Evolutionary Tree")
-
     def spawn_worker(self, integration_q, pid, mp=True):
         for i in range(len(self.base_agent)):
             self._add_optimizer_set(self.base_agent[i])
@@ -136,7 +129,7 @@ class EvoController:
         local_eps = max(self.decay * self.full_count + self.epsilon, .05)
         for i in use_base_idx:
             a = self.base_agent[i].clone(fuzzy=False)
-            if random.random() < .1:
+            if random.random() < .02:
                 a.epsilon = 1.0
             else:
                 a.epsilon = local_eps
@@ -223,9 +216,9 @@ class EvoController:
         killed = self.base_agent[num_survivors:]
         print("")
         for k in killed:
-            if k.id in self.value_opitmizers:
-                self.value_opitmizers.pop(k.id)
-                self.policy_opitmizers.pop(k.id)
+            if k.id in self.optimizers:
+                self.optimizers.pop(k.id)
+                self.last_grad.pop(k.id)
         self.base_agent = self.base_agent[:num_survivors]
 
     def integrate(self, stats):
@@ -239,6 +232,8 @@ class EvoController:
             if stats[id]["failure"]:
                 print("FAILURE DETECTED: ", id)
                 alive.remove(a)
+                self.optimizers.pop(a.id)
+                self.last_grad.pop(a.id)
                 self.base_agent = list(alive)
             self.evo_tree.nodes[id]["fitness"].append(stats[id]["fitness"])
             self.evo_tree.nodes[id]["vloss"].append(stats[id]["value_loss"])
@@ -255,15 +250,13 @@ class EvoController:
             if id not in stats:
                 continue
             # apply gradients
-            self.value_opitmizers[id].zero_grad()
-            self.policy_opitmizers[id].zero_grad()
+            self.optimizers[id].zero_grad()
             grads = stats[id]["gradient"]
             for j, g in enumerate(grads):
-                self.last_grad[j] = .7 * self.last_grad[j] + .3 * g
-            self.base_agent[i].set_grad(self.last_grad)  # sets parameter gradient attributes
+                self.last_grad[id][j] = .7 * self.last_grad[id][j] + .3 * g
+            self.base_agent[i].set_grad(self.last_grad[id])  # sets parameter gradient attributes
             before_plast = self.base_agent[i].core_model.edge.chan_map.detach().clone()
-            self.value_opitmizers[id].step()
-            self.policy_opitmizers[id].step()
+            self.optimizers[id].step()
             self.base_agent[i].version += 1
             after_plast = self.base_agent[i].core_model.edge.chan_map.detach().clone()
             change = torch.sum(torch.abs(after_plast - before_plast))
@@ -316,17 +309,11 @@ class EvoController:
 
     def _add_optimizer_set(self, a):
         aid = a.id
-        if aid not in self.value_opitmizers:
+        if aid not in self.optimizers:
             lr = float(np.power(10, random.random() * (self.log_max_lr - self.log_min_lr) + self.log_min_lr))
-            value_lr = lr
-            policy_lr = lr
-            if self.disjoint_critic:
-                self.value_opitmizers[a.id] = torch.optim.Adam([a.value_decoder, a.input_encoder], lr=.8 * value_lr)
-            else:
-                self.value_opitmizers[a.id] = torch.optim.Adam(a.core_model.parameters() + [a.value_decoder, a.input_encoder],
-                                                               lr=value_lr)
-            self.policy_opitmizers[a.id] = torch.optim.Adam(a.core_model.parameters() + [a.policy_decoder, a.input_encoder],
-                                                            lr=policy_lr)
+            self.optimizers[a.id] = torch.optim.Adam(a.core_model.parameters() + [a.policy_decoder, a.input_encoder,
+                                                                                  a.value_decoder], lr=lr)
+            self.last_grad[aid] = [0. for _ in a.parameters()]
 
     def spawn_visualization_worker(self, mp=True):
         # select current best base agent
@@ -335,7 +322,7 @@ class EvoController:
         use_agent[0].epsilon = max(-(1/decay_by) * self.full_count + 1.0, .01)
         copies = [1]
         if mp:
-            p = Process(target=episode, args=(use_agent, copies, 400, 400, 20, True, "cpu"))
+            p = Process(target=episode, args=(use_agent, copies, 2000, 2000, 20, True, "cpu"))
             return p
         else:
             episode(use_agent, copies, 400, 400, 20, True, "cpu")
@@ -347,8 +334,7 @@ class EvoController:
         v = np.log2(_compute_loss_values(self.value_loss_hist))
         v = round(float(v), 2)
         package = {"agents": self.base_agent,
-                   "v_optim": self.value_opitmizers,
-                   "p_optim": self.policy_opitmizers,
+                   "optim": self.optimizers,
                    "tree": self.evo_tree,
                    "fit_hist": self.fitness_hist,
                    "val_hist": self.value_loss_hist,
@@ -370,7 +356,7 @@ class EvoController:
         self.policy_loss_hist = p["p_hist"]
         try:
             rf = p["r_fxn"]
-            rf.alpha = .01
+            rf.alpha = .05
             self.full_count = p["count"]
             # don't directly assign so we can change rfs
             self.reward_function.count = rf.count
