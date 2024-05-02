@@ -38,7 +38,7 @@ def l2l_loss(logits, targets, lfxn, classes=3, power=2, window=3):
 
 class Decoder:
 
-    def __init__(self,  train_labels=(3, 7), device="cpu", train_init=False):
+    def __init__(self,  train_labels=(3, 7), device="cpu", train_init=False, lr=1e-5):
         self.model = Intrinsic(num_nodes=5, node_shape=(1, 3, 9, 9), kernel_size=6, input_mode="overwrite", device=device)
         self.model.init_weight = torch.nn.Parameter(torch.tensor([.1], device=device))
         self.train_labels = train_labels
@@ -52,7 +52,7 @@ class Decoder:
         self.optim = torch.optim.Adam(params=[self.model.resistance,
                                               self.model.edge.init_weight,
                                               self.model.edge.plasticity,
-                                              self.model.edge.chan_map] + list(self.decoder.parameters()), lr=1e-4)
+                                              self.model.edge.chan_map] + list(self.decoder.parameters()), lr=lr)
 
         self.history = []
 
@@ -145,11 +145,11 @@ class Decoder:
         data = DataLoader(data, shuffle=True, batch_size=1)
         with torch.no_grad():
             logits, labels = self._fit(data, use_labels, iter)
-        labels = torch.tensor(labels, device=self.device).float().flatten()
+        labels = labels.float().flatten()
         probs = torch.sigmoid(logits).flatten()
         avg_loss = l_fxn(logits.flatten(), labels)
         preds = torch.round(probs)
-        acc = torch.count_nonzero(preds == labels) / len(labels)
+        acc = torch.count_nonzero(preds.int() == labels.int()) / len(labels)
         print(iter, "Iterations, avg CE:", avg_loss.detach().item(), "acc:", acc.detach().item())
         probs = probs.detach().cpu().numpy()
         labels = labels.detach().cpu().numpy()
