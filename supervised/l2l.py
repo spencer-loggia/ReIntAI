@@ -1,5 +1,5 @@
 import random
-
+import torch.functional as F
 import torch
 from torchvision.datasets.mnist import MNIST
 from torchvision.transforms import PILToTensor
@@ -13,6 +13,33 @@ matplotlib.use('Qt5Agg')
 import numpy as np
 import pickle
 
+
+def return_from_reward(rewards, gamma):
+    """
+    Compute the discounted returns for each timestep from a tensor of rewards.
+
+    Parameters:
+    - rewards (torch.Tensor): Tensor containing the instantaneous rewards.
+    - gamma (float): Discount factor (0 < gamma <= 1).
+
+    Returns:
+    - torch.Tensor: Tensor containing the discounted returns.
+    """
+    # Initialize an empty tensor to store the returns
+    returns = torch.zeros_like(rewards)
+
+    # Variable to store the accumulated return, initialized to 0
+    G = 0
+
+    # Iterate through the rewards in reverse (from future to past)
+    for t in reversed(range(len(rewards))):
+        # Update the return: G_t = r_t + gamma * G_{t+1}
+        G = rewards[t] + gamma * G
+        returns[t] = G
+
+    return returns
+
+
 def l2l_loss(logits, targets, lfxn, classes=3, power=2, window=3):
     """
     :param logits: (examples, classes)
@@ -22,7 +49,7 @@ def l2l_loss(logits, targets, lfxn, classes=3, power=2, window=3):
     :return:
     """
     device = logits.device
-    targets = targets.float()
+    #targets = targets.float()
     conv_1d = torch.nn.Conv1d(in_channels=1, out_channels=1, kernel_size=window, padding=1,
                               padding_mode="replicate", device=device)
     conv_1d.weight = torch.nn.Parameter(torch.ones_like(conv_1d.weight) / window)
@@ -38,6 +65,16 @@ def l2l_loss(logits, targets, lfxn, classes=3, power=2, window=3):
     return loss
 
 
+def q_loss(val_est, targets, lfxn, gamma=.9):
+    action = torch.argmax(val_est, dim=1)
+    with torch.no_grad():
+        reward = ((action == targets).float()) - .5
+    returns = return_from_reward(reward, gamma=gamma)  # lower is better
+    td = (returns - val_est[:, action])
+    val_loss = torch.mean(td ** 2)
+    return val_loss
+
+
 class Decoder:
 
     def __init__(self,  train_labels=(3, 7), device="cpu", train_init=False, lr=1e-5):
@@ -48,13 +85,13 @@ class Decoder:
         self.internal_feedback_loss = torch.nn.BCELoss()
         if len(self.train_labels) > 2:
             raise ValueError("implemented for binary case only")
-        else:
+        #else:
             # is binary
-            self.decoder = torch.nn.Linear(in_features=9*9, out_features=1, device=device)
+            # self.decoder = torch.nn.Linear(in_features=9*9, out_features=len(train_labels), device=device)
         self.optim = torch.optim.Adam(params=[self.model.resistance,
                                               self.model.edge.init_weight,
                                               self.model.edge.plasticity,
-                                              self.model.edge.chan_map] + list(self.decoder.parameters()), lr=lr)
+                                              self.model.edge.chan_map], lr=lr)
 
         self.history = []
 
@@ -65,18 +102,20 @@ class Decoder:
         img = (img - img.mean()) / img.std()
         in_states = torch.zeros_like(self.model.states)
         mask = in_states.bool()
-        for i in range(2):
+        for i in range(3):
             with torch.no_grad():
                 in_states[0, 0, :, :] = img.detach()
                 mask[0, 0, :, :] = True
             self.model(in_states.detach(), mask.detach())
-        in_features = self.model.states[2, 0, :, :]
-        logits = self.decoder(in_features.view(1, 1, -1)).flatten()
-        correctness = (.5 - torch.abs((torch.sigmoid(logits) - y)))
+        in_features = self.model.states[2, :2, :, :]
+        logits = in_features.mean(dim=(1, 2)).flatten() # self.decoder(in_features.view(1, 1, -1)).flatten() * .25
+        one_hot_target = torch.zeros_like(logits)
+        one_hot_target[y] = 1
+        correctness = .5 - (torch.abs((torch.softmax(logits, dim=0) - one_hot_target))).view((len(self.train_labels), 1, 1))
         for i in range(3):
             # in_states = torch.zeros_like(self.model.states)
             # mask = in_states.bool()
-            in_states[1, 0, :] = correctness
+            in_states[1, :2, :] = correctness
             mask[1, 0, :] = True
             self.model(in_states, mask.detach())
         for i in range(1):
@@ -97,21 +136,21 @@ class Decoder:
             all_logits.append(logits.clone())
             all_labels.append(label)
             count += 1
-        return torch.stack(all_logits, dim=0), torch.tensor(all_labels, device=self.device).float()
+        return torch.stack(all_logits, dim=0), torch.tensor(all_labels, device=self.device).long()
 
-    def l2l_fit(self, data, epochs=1000, batch_size=100, loss_mode="ce", reset_epochs=10):
-        l_fxn = torch.nn.BCEWithLogitsLoss(reduce=False)
+    def l2l_fit(self, data, epochs=1000, batch_size=100, loss_mode="ce", reset_epochs=10, switch_order=True):
+        l_fxn = torch.nn.CrossEntropyLoss(reduce=False)
         data = DataLoader(data, shuffle=True, batch_size=1)
         loss = torch.tensor([0.], device=self.device)
         for epoch in range(epochs):
-            self.train_labels = list(reversed(self.train_labels))
+            if switch_order:
+                self.train_labels = list(reversed(self.train_labels))
             self.optim.zero_grad()
-            if (reset_epochs % 3) == 0:
+            if (reset_epochs % 5) == 0:
                 self.model.detach(reset_intrinsic=True)
             else:
                 self.model.detach(reset_intrinsic=False)
             logits, labels = self._fit(data, self.train_labels, batch_size)
-            logits = logits.flatten()
             # loss = torch.sum(logits)
             if loss_mode == "ce":
                 loss = loss + torch.mean(l_fxn(logits, labels))
@@ -147,23 +186,23 @@ class Decoder:
     def evaluate(self, data, iter, use_labels=None):
         if use_labels is None:
             use_labels = self.train_labels
-        l_fxn = torch.nn.BCEWithLogitsLoss()
+        l_fxn = torch.nn.CrossEntropyLoss()
         data = DataLoader(data, shuffle=True, batch_size=1)
         with torch.no_grad():
             logits, labels = self._fit(data, use_labels, iter)
-        labels = labels.float().flatten()
-        probs = torch.sigmoid(logits).flatten()
-        avg_loss = l_fxn(logits.flatten(), labels)
-        preds = torch.round(probs)
+        labels = labels.long().flatten()
+        probs = torch.softmax(logits, dim=1)[:, 1].flatten()
+        avg_loss = l_fxn(logits, labels)
+        preds = torch.argmax(logits, dim=1).flatten()
         acc = torch.count_nonzero(preds.int() == labels.int()) / len(labels)
         print(iter, "Iterations, avg CE:", avg_loss.detach().item(), "acc:", acc.detach().item())
-        probs = probs.detach().cpu().numpy()
-        labels = labels.detach().cpu().numpy()
+        probs = probs.detach().cpu().float().numpy()
+        labels = labels.detach().cpu().float().numpy()
         return acc, probs, labels
 
     def to(self, device):
         self.device = device
-        self.decoder = self.decoder.to(device)
+        #self.decoder = self.decoder.to(device)
         self.model = self.model.to(device)
         return self
 
