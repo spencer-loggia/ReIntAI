@@ -249,7 +249,7 @@ class FCWaterworldAgent(WaterworldAgent):
             out_states = self.core_model(in_states, mask)
         # compute next action and value estimates
         action_params = out_states[1, 0, :].flatten() @ self.policy_decoder
-        value_est = (out_states[2, 0, :].flatten() @ self.value_decoder).flatten(0) # out_states[2, 0, :, :].flatten() @ self.value_decoder
+        value_est = (out_states[1, 0, :].flatten() @ self.value_decoder).flatten(0) # out_states[2, 0, :, :].flatten() @ self.value_decoder
         c1 = torch.abs(action_params[0:2]) + .001
         c2 = torch.abs(action_params[2:]) + .001
         return c1, c2, value_est
@@ -288,4 +288,29 @@ class FCWaterworldAgent(WaterworldAgent):
         new_agent.epsilon = self.epsilon
         new_agent.id = self.id
         return new_agent
+
+    def pretrain_agent_input(self, epochs, obs_data, use_channels=True):
+        batch_size = 250
+        channels = self.input_channels
+        decoders = torch.nn.Linear(in_features=self.spatial * self.input_channels, out_features=self.input_size)
+        optim = torch.optim.Adam([self.input_encoder] + list(decoders.parameters()), lr=.0001)
+
+        loss_hist = []
+
+        for i in range(epochs):
+            optim.zero_grad()
+            batch = torch.from_numpy(obs_data[np.random.choice(np.arange(len(obs_data)), size=batch_size, replace=False)]).float()
+            encoded = torch.sigmoid(batch @ self.input_encoder)
+            encoded = encoded.view((batch_size, channels * self.spatial))
+            decoded = decoders(encoded)
+            loss = torch.sqrt(torch.mean(torch.pow(batch - decoded, 2)))
+            reg = .001 * torch.sum(torch.abs(self.input_encoder))
+            loss_hist.append(loss.detach().cpu().item())
+            print("epoch", i, "loss", loss_hist[-1], "reg", reg.detach().cpu().item())
+            loss = loss + reg
+            loss.backward()
+            optim.step()
+
+        plt.plot(loss_hist)
+        plt.show()
 

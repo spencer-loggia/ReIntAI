@@ -77,9 +77,9 @@ class EvoController:
         self.viz=viz
         self.algo = algo
         if algo == "a3c":
-            self.reward_function = ActorCritic(gamma=.9, alpha=.25)
+            self.reward_function = ActorCritic(gamma=.95, alpha=.25)
         elif algo == "reinforce":
-            self.reward_function = Reinforce(gamma=.9, alpha=.25)
+            self.reward_function = Reinforce(gamma=.95, alpha=.25)
         else:
             raise ValueError
         self.full_count = 0
@@ -128,7 +128,7 @@ class EvoController:
         local_eps = max(self.decay * self.full_count + self.epsilon, .05)
         for i in use_base_idx:
             a = self.base_agent[i].clone(fuzzy=False)
-            if random.random() < .02:
+            if random.random() < .1:
                 a.epsilon = 1.0
             else:
                 a.epsilon = local_eps
@@ -384,7 +384,7 @@ class EvoController:
                 to_kill = set()
                 if len(workers) < num_workers and epoch <= self.epochs:
                     pid = "".join(random.choices("ABCDEFG1234567", k=5))
-                    if (epoch + 1) % disp_iter == 0:
+                    if (epoch) % disp_iter == 0:
                         print("Episode Display Worker", pid)
                         if epoch != 0:
                             self.save_model(epoch, fbase)
@@ -424,10 +424,11 @@ class EvoController:
         integration_q.close()
 
     def visualize(self):
+        val_hist = np.array(self.value_loss_hist)
         self.axs[0].cla()
         self.axs[1].cla()
         self.axs[2].cla()
-        self.axs[0].plot(np.log2(uniform_filter1d(np.array(self.value_loss_hist), size=5 * self.num_workers)))
+        self.axs[0].plot(np.log2(uniform_filter1d(np.nan_to_num(val_hist, np.mean(val_hist)), size=5 * self.num_workers)))
         self.axs[1].plot(uniform_filter1d(np.array(self.policy_loss_hist), size=5 * self.num_workers))
         self.axs[2].plot(uniform_filter1d(np.array(self.fitness_hist), size=5 * self.num_workers))
         mypause(.05)
