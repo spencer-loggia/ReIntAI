@@ -138,7 +138,7 @@ class Decoder:
             count += 1
         return torch.stack(all_logits, dim=0), torch.tensor(all_labels, device=self.device).long()
 
-    def l2l_fit(self, data, epochs=1000, batch_size=100, loss_mode="ce", reset_epochs=10, switch_order=True):
+    def l2l_fit(self, data, epochs=1000, batch_size=100, loss_mode="ce", reset_epochs=5, switch_order=True):
         l_fxn = torch.nn.CrossEntropyLoss(reduce=False)
         data = DataLoader(data, shuffle=True, batch_size=1)
         loss = torch.tensor([0.], device=self.device)
@@ -146,7 +146,7 @@ class Decoder:
             if switch_order:
                 self.train_labels = list(reversed(self.train_labels))
             self.optim.zero_grad()
-            if (reset_epochs % 5) == 0:
+            if (epoch % reset_epochs) == 0:
                 self.model.detach(reset_intrinsic=True)
             else:
                 self.model.detach(reset_intrinsic=False)
