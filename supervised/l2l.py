@@ -61,7 +61,7 @@ class Decoder:
     def forward(self, X, y):
         pool = torch.nn.MaxPool2d(3)
         img = X.float()
-        img = pool(img.reshape((1, 1, img.shape[-1], -1))).flatten()
+        img = pool(img.reshape((1, 1, img.shape[-1], -1))).squeeze()
         img = (img - img.mean()) / img.std()
         in_states = torch.zeros_like(self.model.states)
         mask = in_states.bool()
