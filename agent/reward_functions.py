@@ -5,9 +5,30 @@ import torch
 
 
 def return_from_reward(rewards, gamma):
-    # Calculate the returns using cumulative sum and then reverse the order
-    returns = torch.flip(torch.cumsum(torch.flip(rewards, [0]) * gamma, dim=0), [0])
+    """
+    Compute the discounted returns for each timestep from a tensor of rewards.
+
+    Parameters:
+    - rewards (torch.Tensor): Tensor containing the instantaneous rewards.
+    - gamma (float): Discount factor (0 < gamma <= 1).
+
+    Returns:
+    - torch.Tensor: Tensor containing the discounted returns.
+    """
+    # Initialize an empty tensor to store the returns
+    returns = torch.zeros_like(rewards)
+
+    # Variable to store the accumulated return, initialized to 0
+    G = 0
+
+    # Iterate through the rewards in reverse (from future to past)
+    for t in reversed(range(len(rewards))):
+        # Update the return: G_t = r_t + gamma * G_{t+1}
+        G = rewards[t] + gamma * G
+        returns[t] = G
+
     return returns
+
 
 
 class ActorCritic:
