@@ -153,17 +153,17 @@ class Decoder:
             logits, labels = self._fit(data, self.train_labels, batch_size)
             # loss = torch.sum(logits)
             if loss_mode == "ce":
-                loss = loss + torch.mean(l_fxn(logits, labels))
+                l_loss = torch.mean(l_fxn(logits, labels))
             elif loss_mode == "l2l":
-                loss = loss + l2l_loss(logits, labels, l_fxn)
+                l_loss =  l2l_loss(logits, labels, l_fxn)
             elif loss_mode == "both":
-                loss = loss + .5 * l2l_loss(logits, labels, l_fxn) + .5 * torch.mean(l_fxn(logits, labels)) #
+                l_loss = .5 * l2l_loss(logits, labels, l_fxn) + .5 * torch.mean(l_fxn(logits, labels)) #
             else:
                 raise ValueError
             reg = torch.sum(torch.pow(self.model.edge.chan_map, 2)) + torch.sum(torch.abs(self.model.edge.plasticity))
-            self.history.append(loss.detach().cpu().item())
+            self.history.append(l_loss.detach().cpu().item())
             print("Epoch", epoch, "loss is", self.history[-1])
-            loss = loss + .001 * reg
+            loss = loss + l_loss + .001 * reg
             print('REG', .001 * reg)
             if (epoch + 1) % 2 == 0:
                 # init_plast = self.model.edge.chan_map.clone()
