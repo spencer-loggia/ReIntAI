@@ -27,7 +27,7 @@ def l2l_loss(logits, targets, lfxn, classes=3, power=2, window=3):
                               padding_mode="replicate", device=device)
     conv_1d.weight = torch.nn.Parameter(torch.ones_like(conv_1d.weight) / window)
     conv_1d.bias = torch.nn.Parameter(torch.zeros_like(conv_1d.bias))
-    ce_loss = lfxn(logits, targets).view((-1,)) #
+    ce_loss = lfxn(logits, targets).view((-1,))  #
     print(ce_loss)
     filt_ce_loss = conv_1d(ce_loss.view((1, 1, -1))).flatten()
     ce_loss = filt_ce_loss[1:] - filt_ce_loss[:-1].detach()
@@ -42,7 +42,7 @@ class Decoder:
 
     def __init__(self,  train_labels=(3, 7), device="cpu", train_init=False, lr=1e-5):
         self.model = FCIntrinsic(num_nodes=5, node_shape=(1, 3, 14*14), kernel_size=None, input_mode="overwrite", device=device)
-        #self.model.init_weight = torch.nn.Parameter(torch.tensor([.1], device=device))
+        self.model.init_weight = torch.nn.Parameter(torch.tensor([.01], device=device))
         self.train_labels = train_labels
         self.device = device
         self.internal_feedback_loss = torch.nn.BCELoss()
