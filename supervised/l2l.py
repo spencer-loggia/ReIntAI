@@ -72,7 +72,7 @@ class Decoder:
             self.model(in_states.detach(), mask.detach())
         in_features = self.model.states[2, 0, :]
         logits = self.decoder(in_features.view(1, 1, -1)).flatten()
-        correctness = (1 - torch.abs((torch.sigmoid(logits) - y))) * .3 - .1
+        correctness = (.5 - torch.abs((torch.sigmoid(logits) - y)))
         for i in range(2):
             # in_states = torch.zeros_like(self.model.states)
             # mask = in_states.bool()
