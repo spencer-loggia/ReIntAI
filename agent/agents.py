@@ -221,13 +221,37 @@ class FCWaterworldAgent(WaterworldAgent):
         super().__init__(*args, **kwargs)
         self.value_decoder = torch.empty((self.spatial, 1), device=self.device)
         self.value_decoder = torch.nn.Parameter(torch.nn.init.xavier_normal_(self.value_decoder))
+        self.value_decoder_bias = torch.nn.Parameter(torch.zeros((1,), device=self.device) + .001)
+
         self.policy_decoder = torch.empty((self.spatial, 4), device=self.device)
         self.policy_decoder = torch.nn.Parameter(torch.nn.init.xavier_normal_(self.policy_decoder))
+        self.policy_decoder_bias = torch.nn.Parameter(torch.zeros((1,), device=self.device) + .001)
+
         input_encoder = torch.empty((self.input_size, self.spatial * self.input_channels), device=self.device)
         input_encoder = torch.nn.init.xavier_normal_(input_encoder)
         self.input_encoder = torch.nn.Parameter(input_encoder)
+        self.input_encoder_bias = torch.nn.Parameter(torch.zeros((1,), device=self.device) + .001)
+
         self.core_model = FCIntrinsic(num_nodes=4, node_shape=(1, self.channels, self.spatial))
         self.kernel_size = None
+
+    def parameters(self):
+        agent_heads = [self.input_encoder, self.input_encoder_bias, self.value_decoder,
+                       self.value_decoder_bias, self.policy_decoder, self.policy_decoder_bias] + self.core_model.parameters()
+        return agent_heads
+
+    def set_grad(self, grad):
+        # MUST BE IN SAME ORDER AS PARAMETERS (BAD PRACTICE BUT LAZY)
+        self.policy_decoder_bias.grad = grad[5]
+        self.policy_decoder.grad = grad[4]
+
+        self.value_decoder_bias.grad = grad[3]
+        self.value_decoder.grad = grad[2]
+
+        self.input_encoder_bias.grad = grad[1]
+        self.input_encoder.grad = grad[0]
+
+        self.core_model.set_grad(grad[6:])
 
     def forward(self, X, r=None):
         """
@@ -236,7 +260,7 @@ class FCWaterworldAgent(WaterworldAgent):
         :return: Mu, Sigma, Value - the mean and variance of the action distribution, and the state value estimate
         """
         # create a state matrix for injection into core from input observation
-        encoded_input = (X @ self.input_encoder).view(self.spatial, self.input_channels).transpose(0, 1)
+        encoded_input = ((X + self.input_encoder_bias) @ self.input_encoder).view(self.spatial, self.input_channels).transpose(0, 1)
         in_states = torch.zeros_like(self.core_model.states)
         mask = in_states.bool()
         mask[0, :self.input_channels, :] = True
@@ -248,8 +272,8 @@ class FCWaterworldAgent(WaterworldAgent):
         for i in range(1):
             out_states = self.core_model(in_states, mask)
         # compute next action and value estimates
-        action_params = out_states[1, 0, :].flatten() @ self.policy_decoder
-        value_est = (out_states[1, 0, :].flatten() @ self.value_decoder).flatten(0) # out_states[2, 0, :, :].flatten() @ self.value_decoder
+        action_params = (out_states[1, 0, :].flatten() + self.policy_decoder_bias) @ self.policy_decoder
+        value_est = ((out_states[2, 0, :].flatten() + self.value_decoder_bias) @ self.value_decoder).flatten(0) # out_states[2, 0, :, :].flatten() @ self.value_decoder
         c1 = torch.abs(action_params[0:2]) + .001
         c2 = torch.abs(action_params[2:]) + .001
         return c1, c2, value_est

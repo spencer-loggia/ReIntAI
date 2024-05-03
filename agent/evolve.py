@@ -77,9 +77,9 @@ class EvoController:
         self.viz=viz
         self.algo = algo
         if algo == "a3c":
-            self.reward_function = ActorCritic(gamma=.95, alpha=.25)
+            self.reward_function = ActorCritic(gamma=.95, alpha=1.0)
         elif algo == "reinforce":
-            self.reward_function = Reinforce(gamma=.95, alpha=.25)
+            self.reward_function = Reinforce(gamma=.95, alpha=1.0)
         else:
             raise ValueError
         self.full_count = 0
@@ -311,7 +311,8 @@ class EvoController:
         if aid not in self.optimizers:
             lr = float(np.power(10, random.random() * (self.log_max_lr - self.log_min_lr) + self.log_min_lr))
             self.optimizers[a.id] = torch.optim.Adam(a.core_model.parameters() + [a.policy_decoder, a.input_encoder,
-                                                                                  a.value_decoder], lr=lr)
+                                                                                  a.value_decoder, a.policy_decoder_bias,
+                                                                                  a.value_decoder_bias], lr=lr)
             self.last_grad[aid] = [0. for _ in a.parameters()]
 
     def spawn_visualization_worker(self, mp=True):
@@ -355,7 +356,7 @@ class EvoController:
         self.policy_loss_hist = p["p_hist"]
         try:
             rf = p["r_fxn"]
-            rf.alpha = .05
+            rf.alpha = 1.0
             self.full_count = p["count"]
             # don't directly assign so we can change rfs
             self.reward_function.count = rf.count
