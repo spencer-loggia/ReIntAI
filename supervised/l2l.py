@@ -30,7 +30,7 @@ def l2l_loss(logits, targets, lfxn, classes=3, power=2, window=3):
     ce_loss = lfxn(logits, targets).view((-1,))  #
     print(ce_loss)
     filt_ce_loss = conv_1d(ce_loss.view((1, 1, -1))).flatten()
-    ce_loss = filt_ce_loss[1:] - filt_ce_loss[:-1].detach()
+    ce_loss = filt_ce_loss[1:] - filt_ce_loss[:-1] # .detach()
     ce_loss = ce_loss + torch.relu(ce_loss) * 4
     print(ce_loss)
     loss = torch.sum(ce_loss) #+ torch.pow(chance_ce - ce_loss[0], 2)
@@ -102,22 +102,23 @@ class Decoder:
     def l2l_fit(self, data, epochs=1000, batch_size=100, loss_mode="ce", reset_epochs=10):
         l_fxn = torch.nn.BCEWithLogitsLoss(reduce=False)
         data = DataLoader(data, shuffle=True, batch_size=1)
+        loss = torch.tensor([0.], device=self.device)
         for epoch in range(epochs):
+            self.train_labels = list(reversed(self.train_labels))
             self.optim.zero_grad()
-            if (reset_epochs % 20) == 0:
+            if (reset_epochs % 3) == 0:
                 self.model.detach(reset_intrinsic=True)
             else:
-                self.train_labels = list(reversed(self.train_labels))
                 self.model.detach(reset_intrinsic=False)
             logits, labels = self._fit(data, self.train_labels, batch_size)
             logits = logits.flatten()
             # loss = torch.sum(logits)
             if loss_mode == "ce":
-                loss = torch.mean(l_fxn(logits, labels))
+                loss = loss + torch.mean(l_fxn(logits, labels))
             elif loss_mode == "l2l":
-                loss = l2l_loss(logits, labels, l_fxn)
+                loss = loss + l2l_loss(logits, labels, l_fxn)
             elif loss_mode == "both":
-                loss = .5 * l2l_loss(logits, labels, l_fxn) + .5 * torch.mean(l_fxn(logits, labels)) #
+                loss = loss + .5 * l2l_loss(logits, labels, l_fxn) + .5 * torch.mean(l_fxn(logits, labels)) #
             else:
                 raise ValueError
             reg = torch.sum(torch.pow(self.model.edge.chan_map, 2)) + torch.sum(torch.abs(self.model.edge.plasticity))
@@ -125,9 +126,11 @@ class Decoder:
             print("Epoch", epoch, "loss is", self.history[-1])
             loss = loss + .001 * reg
             print('REG', .001 * reg)
-            # init_plast = self.model.edge.chan_map.clone()
-            loss.backward()
-            self.optim.step()
+            if (epoch + 1) % 2 == 0:
+                # init_plast = self.model.edge.chan_map.clone()
+                loss.backward()
+                self.optim.step()
+                loss = torch.zeros_like(loss)
             # print("change:", init_plast - self.model.edge.chan_map.clone())
 
     def forward_fit(self, data, iter, use_labels=None):
