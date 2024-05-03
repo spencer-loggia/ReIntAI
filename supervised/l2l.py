@@ -42,7 +42,7 @@ class Decoder:
 
     def __init__(self,  train_labels=(3, 7), device="cpu", train_init=False, lr=1e-5):
         self.model = FCIntrinsic(num_nodes=5, node_shape=(1, 3, 14*14), kernel_size=None, input_mode="overwrite", device=device)
-        self.model.init_weight = torch.nn.Parameter(torch.tensor([.01], device=device))
+        # self.model.init_weight = torch.nn.Parameter(torch.tensor([.01], device=device))
         self.train_labels = train_labels
         self.device = device
         self.internal_feedback_loss = torch.nn.BCELoss()
