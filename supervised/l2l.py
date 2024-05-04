@@ -108,14 +108,12 @@ class Decoder:
                 mask[0, 0, :, :] = True
             self.model(in_states.detach(), mask.detach())
         in_features = self.model.states[2, :2, :, :]
-        logits = in_features.mean(dim=(1, 2)).flatten() # self.decoder(in_features.view(1, 1, -1)).flatten() * .25
-        one_hot_target = torch.zeros_like(logits)
-        one_hot_target[y] = 1
-        correctness = .5 - (torch.abs((torch.softmax(logits, dim=0) - one_hot_target))).view((len(self.train_labels), 1, 1))
+        logits = in_features.mean(dim=(1, 2)).flatten()  # self.decoder(in_features.view(1, 1, -1)).flatten() * .25
+        correct = 2 * (torch.argmax(logits, dim=0) == y) - 1
         for i in range(3):
             # in_states = torch.zeros_like(self.model.states)
             # mask = in_states.bool()
-            in_states[1, :2, :] = correctness
+            in_states[1, 0, :] = correct
             mask[1, 0, :] = True
             self.model(in_states, mask.detach())
         for i in range(1):
