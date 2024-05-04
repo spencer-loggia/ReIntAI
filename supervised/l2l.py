@@ -109,7 +109,7 @@ class Decoder:
             self.model(in_states.detach(), mask.detach())
         in_features = self.model.states[2, :2, :, :]
         logits = in_features.mean(dim=(1, 2)).flatten()  # self.decoder(in_features.view(1, 1, -1)).flatten() * .25
-        correct = 2 * (torch.argmax(logits, dim=0) == y) - 1
+        correct = 3 * (torch.argmax(logits, dim=0) == y) - 1
         for i in range(3):
             # in_states = torch.zeros_like(self.model.states)
             # mask = in_states.bool()
