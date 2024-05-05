@@ -122,9 +122,9 @@ class PlasticEdges():
              self.kernel_size ** 2))
 
         # add random noise to chan map to prevent it from becoming nonsingular
-        # chan_mod = torch.empty_like(self.chan_map)
-        # chan_mod = torch.nn.init.xavier_normal_(chan_mod) * .01
-        # self.chan_map = self.chan_map + chan_mod
+        chan_mod = torch.empty_like(self.chan_map)
+        chan_mod = torch.nn.init.xavier_normal_(chan_mod) * .1
+        self.chan_map = self.chan_map + chan_mod
 
         # Compose plastic weights and channel map
         # uvscok,
