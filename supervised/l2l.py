@@ -40,7 +40,7 @@ def return_from_reward(rewards, gamma):
     return returns
 
 
-def l2l_loss(logits, targets, lfxn, classes=3, power=2, window=3):
+def l2l_loss(logits, targets, lfxn, classes=3, power=2, window=4):
     """
     :param logits: (examples, classes)
     :param targets: (examples)
@@ -57,7 +57,7 @@ def l2l_loss(logits, targets, lfxn, classes=3, power=2, window=3):
     ce_loss = lfxn(logits, targets).view((-1,))  #
     print(ce_loss)
     filt_ce_loss = conv_1d(ce_loss.view((1, 1, -1))).flatten()
-    ce_loss = filt_ce_loss[1:] - filt_ce_loss[:-1] # .detach()
+    ce_loss = filt_ce_loss[1:] - filt_ce_loss[:-1].detach()
     ce_loss = ce_loss + torch.relu(ce_loss) * 4
     print(ce_loss)
     loss = torch.sum(ce_loss) #+ torch.pow(chance_ce - ce_loss[0], 2)
