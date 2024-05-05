@@ -178,11 +178,11 @@ class PlasticEdges():
         target_activations = target_activation.view(self.num_nodes * self.channels,
                                                     self.spatial1 * self.spatial2, 1).transpose(0, 1)  # (_, s, nc)
 
-        chan_map = self.chan_map.permute((0, 2, 1, 3)).reshape(
+        chan_map = (self.chan_map + self.chan_mod).permute((0, 2, 1, 3)).reshape(
             (1, self.num_nodes * self.channels, self.num_nodes * self.channels))
 
         # This is a fast and  numerically stable equivalent to (chan_map ^ -1) (target_activations)
-        inv, info = torch.linalg.solve_ex((chan_map + self.chan_mod), target_activations)
+        inv, info = torch.linalg.solve_ex(chan_map, target_activations)
         target_meta_activations = torch.sigmoid(inv)
         target_meta_activations = target_meta_activations.transpose(0, 1).reshape(self.num_nodes, self.channels,
                                                                                   self.spatial1,
