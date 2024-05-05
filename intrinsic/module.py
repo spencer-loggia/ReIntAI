@@ -121,6 +121,11 @@ class PlasticEdges():
             (self.num_nodes, self.num_nodes, self.spatial1 * self.spatial2, self.channels, self.channels,
              self.kernel_size ** 2))
 
+        # add random noise to chan map to prevent it from becoming nonsingular
+        chan_mod = torch.empty_like(self.chan_map)
+        chan_mod = torch.nn.init.xavier_normal_(chan_mod) * .01
+        self.chan_map = self.chan_map + chan_mod
+
         # Compose plastic weights and channel map
         # uvscok,
         # combined_weight = combined_weight * self.chan_map.view((self.num_nodes, self.num_nodes, 1, self.channels, self.channels, 1))
@@ -176,7 +181,8 @@ class PlasticEdges():
             (1, self.num_nodes * self.channels, self.num_nodes * self.channels))
 
         # This is a fast and  numerically stable equivalent to (chan_map ^ -1) (target_activations)
-        target_meta_activations = torch.sigmoid(torch.linalg.solve(chan_map, target_activations))
+        inv, info = torch.linalg.solve_ex(chan_map, target_activations)
+        target_meta_activations = torch.sigmoid(inv)
         target_meta_activations = target_meta_activations.transpose(0, 1).reshape(self.num_nodes, self.channels,
                                                                                   self.spatial1,
                                                                                   self.spatial2)  # u, c, s, s
