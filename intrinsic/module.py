@@ -51,6 +51,7 @@ class PlasticEdges():
         # Channel Mapping
         chan_map = torch.empty((num_nodes, num_nodes, channels, channels), device=device)
         self.chan_map = torch.nn.Parameter(torch.nn.init.xavier_normal_(chan_map * .0001))
+        self.chan_mod = torch.tensor([0.], device=device)
 
         if "init_plasticity" in kwargs:
             init_plasticity = kwargs["init_plasticity"]
@@ -123,14 +124,14 @@ class PlasticEdges():
 
         # add random noise to chan map to prevent it from becoming nonsingular
         chan_mod = torch.empty_like(self.chan_map)
-        chan_mod = torch.nn.init.xavier_normal_(chan_mod) * .1
-        self.chan_map = self.chan_map + chan_mod
+        self.chan_mod = torch.nn.init.xavier_normal_(chan_mod) * .1
+        # self.chan_map = self.chan_map + chan_mod
 
         # Compose plastic weights and channel map
         # uvscok,
         # combined_weight = combined_weight * self.chan_map.view((self.num_nodes, self.num_nodes, 1, self.channels, self.channels, 1))
         iterrule = "uvscok, vbop -> ubscpk"
-        combined_weight = torch.einsum(iterrule, combined_weight, self.chan_map)
+        combined_weight = torch.einsum(iterrule, combined_weight, (self.chan_map + chan_mod))
 
         # src_nodes (u), target_node (v), flat_spatial (s), channels (c), flat_kernel (k)
         # src_nodes (u), target_node (v), flat_spatial (s), in_channels (c), out_channels (o), flat_kernel (k)
@@ -181,7 +182,7 @@ class PlasticEdges():
             (1, self.num_nodes * self.channels, self.num_nodes * self.channels))
 
         # This is a fast and  numerically stable equivalent to (chan_map ^ -1) (target_activations)
-        inv, info = torch.linalg.solve_ex(chan_map, target_activations)
+        inv, info = torch.linalg.solve_ex((chan_map + self.chan_mod), target_activations)
         target_meta_activations = torch.sigmoid(inv)
         target_meta_activations = target_meta_activations.transpose(0, 1).reshape(self.num_nodes, self.channels,
                                                                                   self.spatial1,
