@@ -120,7 +120,7 @@ def episode(base_agents, copies, min_cycles=1500, max_cycles=1500, sensors=20, h
 def local_evolve(q, pipe, generations, base_agents, copies, reward_function, train_act=True, train_critic=True, critic_random_only=False, proc=0, device="cpu"):
     try:
         num_base = len(base_agents)
-
+        device = base_agents[0].device
         fail_tracker = [False for _ in range(num_base)]
         stat_tracker = {a.id: {"gradient": [0. for _ in a.parameters()],
                                "value_loss": [],
@@ -131,8 +131,8 @@ def local_evolve(q, pipe, generations, base_agents, copies, reward_function, tra
                                "failure": False} for i, a in enumerate(base_agents)}
         for gen in range(generations):
             h_int = False
-            total_loss = [torch.Tensor([0.], device=device) for _ in range(num_base)]
-            gen_info, base_scores = episode(base_agents, copies, h_int)
+            total_loss = [torch.tensor([0.], device=device) for _ in range(num_base)]
+            gen_info, base_scores = episode(base_agents, copies, h_int, device=device)
             for a in stat_tracker.keys():
                 stat_tracker[a]["value_loss"].append([])
                 stat_tracker[a]["policy_loss"].append([])
@@ -145,18 +145,18 @@ def local_evolve(q, pipe, generations, base_agents, copies, reward_function, tra
                     continue
                 if not (agent_info["failure"]) and not stat_tracker[agent_info["base_name"]]["failure"]:
                     # whether to train critic only when random action is taken.
-                    is_random = torch.Tensor(agent_info["is_random"], device=device)
+                    is_random = torch.tensor(agent_info["is_random"], device=device)
 
                     if reward_function.__name__ == "ActorCritic":
-                        val_loss, policy_loss = reward_function.loss(torch.Tensor(agent_info["inst_r"], device=device),
+                        val_loss, policy_loss = reward_function.loss(torch.tensor(agent_info["inst_r"], device=device),
                                                                                torch.concat(agent_info["value"], dim=0),
                                                                                torch.stack(agent_info["action_likelihood"], dim=0),
                                                                                torch.stack(agent_info["entropy"], dim=0))
                     elif reward_function.__name__ == "Reinforce":
-                        policy_loss = reward_function.loss(torch.Tensor(agent_info["inst_r"], device=device),
+                        policy_loss = reward_function.loss(torch.tensor(agent_info["inst_r"], device=device),
                                                                                torch.stack(agent_info["action_likelihood"], dim=0),
                                                                                torch.stack(agent_info["entropy"], dim=0))
-                        val_loss = torch.Tensor([0.])
+                        val_loss = torch.tensor([0.])
                     else:
                         raise ValueError("undefined reward function")
 
@@ -208,7 +208,8 @@ def local_evolve(q, pipe, generations, base_agents, copies, reward_function, tra
                     total_loss[i].backward()
                     for j, p in enumerate(a.parameters()):
                         if not torch.isnan(p.grad).any():
-                            stat_tracker[a.id]["gradient"][j] += p.grad.detach()
+                            # send gradient to cpu
+                            stat_tracker[a.id]["gradient"][j] += p.grad.detach().cpu()
                         else:
                             print("NaN grad", a.id)
                             stat_tracker[a.id]["failure"] = True
