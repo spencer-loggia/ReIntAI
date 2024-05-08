@@ -1,16 +1,19 @@
 from agent.agents import WaterworldAgent, DisjointWaterWorldAgent, FCWaterworldAgent
 from agent.evolve import EvoController
 import pickle
+import torch
+torch.set_default_dtype(torch.float64)
+
 
 if __name__=="__main__":
     FC_AGENT = True
     DISJOINT_CRITIC = False
     EPOCHS = 20000
-    EPSILON_START = .95
-    EPSILON_DECAY = 4000
+    EPSILON_START = 1.0
+    EPSILON_DECAY = 3000
     ALGORITM = "a3c"
-    LOG_MAX_LR = -3.5
-    LOG_MIN_LR = -8
+    LOG_MAX_LR = -4
+    LOG_MIN_LR = -6
 
     if FC_AGENT:
         path = "models/fc_evo_32_bias"
@@ -30,10 +33,10 @@ if __name__=="__main__":
 
         with open("models/wworld_pretrain7.pkl", "rb") as f:
             in_enc = pickle.load(f)
-        agent.input_encoder = in_enc
+        agent.input_encoder = in_enc.to(torch.float64)
 
     evo = EvoController(seed_agent=agent, epochs=EPOCHS, num_base=4, num_workers=10,
                         min_agents=1, max_agents=3, min_gen=1, max_gen=1, log_min_lr=LOG_MIN_LR, log_max_lr=LOG_MAX_LR,
                         algo=ALGORITM, start_epsilon=EPSILON_START, inverse_eps_decay=EPSILON_DECAY, worker_device="cpu")
-    # evo.load_model("/Users/loggiasr/Projects/ReIntAI/models/fc_evo_32/snap_4500_5.52_.pkl")
+    evo.load_model("/Users/loggiasr/Projects/ReIntAI/models/fc_evo_32_bias/snap_500_7.85_.pkl")
     evo.controller(mp=True, fbase=path)
