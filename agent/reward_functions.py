@@ -40,10 +40,14 @@ class ActorCritic:
         self.std = 1.
         self._stat_gamma = stat_gamma
         self.count = 0.
+        self.debug = False
         self.__name__ = "ActorCritic"
 
-    def loss(self, rewards, value_estimates, log_probs, entropies, is_random):
+    def loss(self, rewards, value_estimates, log_probs, entropies, is_random=None):
         cutoff = max(16, len(rewards) - 15)
+        if self.debug:
+            entropies.register_hook(lambda grad: print("Grad H ", torch.abs(grad).sum()))
+            log_probs.register_hook(lambda grad: print("Grad LogProb ", torch.abs(grad).sum()))
         returns = return_from_reward(rewards, self.gamma)[:cutoff]
         sg = self._stat_gamma
         self.count += 1
@@ -57,8 +61,12 @@ class ActorCritic:
         # compute advantages
         advantages = returns - value_estimates[:cutoff]
         # Calculate the critic loss, only where actions are random
-        masked_td = advantages * is_random[:cutoff].float()
+        if is_random is not None:
+            masked_td = advantages * is_random[:cutoff].float()
+        else:
+            masked_td = advantages
         critic_loss = torch.pow(masked_td, 2).sum()
+        # critic_loss.register_hook(lambda grad: print("Grad C Loss", torch.abs(grad).sum()))
         # Calculate the actor loss incorporating the entropy term
         actor_loss = -(log_probs[:cutoff] * advantages.detach() + self.alpha * entropies[:cutoff]).sum()
         if torch.isnan(critic_loss + actor_loss):

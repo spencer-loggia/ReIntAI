@@ -12,6 +12,7 @@ matplotlib.use('Qt5Agg')
 
 import numpy as np
 import torch
+torch.set_default_dtype(torch.float64)
 from torch.multiprocessing import Queue, Process
 from collections import deque
 
@@ -21,7 +22,7 @@ from agent.exist import local_evolve, episode
 from scipy.ndimage import uniform_filter1d
 
 
-def _compute_loss_values(arr, copies=None, window=15):
+def _compute_loss_values(arr, copies=None, window=25):
     len_hist = len(arr)
     start = min(len_hist, window)
     arr = np.array(arr[-start:], dtype=float)
@@ -77,9 +78,9 @@ class EvoController:
         self.viz=viz
         self.algo = algo
         if algo == "a3c":
-            self.reward_function = ActorCritic(gamma=.95, alpha=1.0)
+            self.reward_function = ActorCritic(gamma=.93, alpha=.2)
         elif algo == "reinforce":
-            self.reward_function = Reinforce(gamma=.95, alpha=1.0)
+            self.reward_function = Reinforce(gamma=.93, alpha=.2)
         else:
             raise ValueError
         self.full_count = 0
@@ -125,15 +126,17 @@ class EvoController:
         select_base_idx = np.random.choice(np.arange(len(self.base_agent)), size=num_agents)
         use_base_idx, copies = np.unique(select_base_idx, return_counts=True)
         use_base = []
-        local_eps = max(self.decay * self.full_count + self.epsilon, .05)
+        self.reward_function.alpha = max(.075 * self.decay * self.full_count + .2, .005)
+        local_eps = max(self.decay * self.full_count + self.epsilon, 0)
         for i in use_base_idx:
             a = self.base_agent[i].clone(fuzzy=False)
-            if random.random() < .1:
-                a.epsilon = 1.0
+            force_explore = random.random()
+            if random.random() < .14 and force_explore > local_eps:
+                a.epsilon = random.random() * .8
             else:
-                a.epsilon = local_eps
+                a.epsilon = local_eps + (random.random() * .02)
             use_base.append(a)
-        if self.algo == "a3c" and (self.full_count < 250):
+        if self.algo == "a3c" and (self.full_count < 0):
             train_critic = True
             train_actor = False
         else:
@@ -142,7 +145,7 @@ class EvoController:
 
 
         print("OPTIM:", num_gens, "generations,", num_agents, "agents of types:", [a.id for a in use_base])
-        train_critic_random_only = not self.disjoint_critic
+        train_critic_random_only = False
         if mp:
             p = Process(target=local_evolve,
                         args=(integration_q, num_gens, use_base, copies.tolist(), self.reward_function, train_actor,
@@ -190,7 +193,7 @@ class EvoController:
     def survival(self):
         # select the most fit in the overall pool.
         # all_agents = [a.clone(fuzzy=False) for a in self.base_agent]
-        kill_prob = 1 / (4 * self.num_workers)
+        kill_prob = 1 / (6 * self.num_workers)
         if random.random() > kill_prob:
             return
         # num_survivors = min(self.num_base - 1, math.ceil(self.num_base * .75))
@@ -252,7 +255,7 @@ class EvoController:
             self.optimizers[id].zero_grad()
             grads = stats[id]["gradient"]
             for j, g in enumerate(grads):
-                self.last_grad[id][j] = .7 * self.last_grad[id][j] + .3 * g
+                self.last_grad[id][j] = .6 * self.last_grad[id][j] + .4 * g
             self.base_agent[i].set_grad(self.last_grad[id])  # sets parameter gradient attributes
             before_plast = self.base_agent[i].core_model.edge.chan_map.detach().clone()
             self.optimizers[id].step()
@@ -276,8 +279,8 @@ class EvoController:
         next_gen = []
         for i in range(self.num_base - num_survivors):
             parent1 = random.choice(self.base_agent)
-            parent2 = random.choice(self.base_agent)
-            if random.random() < 1.0:
+            parent2 = parent1
+            if random.random() < .75:
                 child = self.multiclone(parent1, parent2, equal=True)
             else:
                 child = self.multiclone(parent1, parent2)
@@ -291,7 +294,7 @@ class EvoController:
                 fit = _compute_loss_values(self.evo_tree.nodes[p.id]["fitness"], cp) / 2
                 v = _compute_loss_values(self.evo_tree.nodes[p.id]["vloss"], cp) / 2
                 pl = _compute_loss_values(self.evo_tree.nodes[p.id]["ploss"], cp) / 2
-                fit = fit - .01
+                fit = fit - .001
                 v = v * 1.0
                 if child.id in self.evo_tree.nodes:
                     self.evo_tree.nodes[child.id]["fitness"][-1] += fit
@@ -312,14 +315,14 @@ class EvoController:
             lr = float(np.power(10, random.random() * (self.log_max_lr - self.log_min_lr) + self.log_min_lr))
             self.optimizers[a.id] = torch.optim.Adam(a.core_model.parameters() + [a.policy_decoder, a.input_encoder,
                                                                                   a.value_decoder, a.policy_decoder_bias,
-                                                                                  a.value_decoder_bias], lr=lr)
+                                                                                  a.value_decoder_bias, a.input_encoder_bias], lr=lr)
             self.last_grad[aid] = [0. for _ in a.parameters()]
 
     def spawn_visualization_worker(self, mp=True):
         # select current best base agent
         use_agent = [max(self.base_agent, key=lambda x: x.fitness)]
         decay_by = 4000
-        use_agent[0].epsilon = max(-(1/decay_by) * self.full_count + 1.0, .01)
+        use_agent[0].epsilon = 0. # max(-(1/decay_by) * self.full_count + 1.0, .01)
         copies = [1]
         if mp:
             p = Process(target=episode, args=(use_agent, copies, 2000, 2000, 20, True, "cpu"))
@@ -356,7 +359,7 @@ class EvoController:
         self.policy_loss_hist = p["p_hist"]
         try:
             rf = p["r_fxn"]
-            rf.alpha = 1.0
+            rf.alpha = .0002
             self.full_count = p["count"]
             # don't directly assign so we can change rfs
             self.reward_function.count = rf.count
@@ -380,8 +383,11 @@ class EvoController:
             # to_remove = []
             if mp:
                 for k in to_kill:
-                    workers[k].join()
-                    workers.pop(k)
+                    try:
+                        workers[k].join()
+                        workers.pop(k)
+                    except KeyError:
+                        print("Worker to kill DNE - possible zombie")
                 to_kill = set()
                 if len(workers) < num_workers and epoch <= self.epochs:
                     pid = "".join(random.choices("ABCDEFG1234567", k=5))
@@ -430,7 +436,8 @@ class EvoController:
         self.axs[1].cla()
         self.axs[2].cla()
         self.axs[0].plot(np.log2(uniform_filter1d(np.nan_to_num(val_hist, np.mean(val_hist)), size=5 * self.num_workers)))
-        self.axs[1].plot(uniform_filter1d(np.array(self.policy_loss_hist), size=5 * self.num_workers))
+        p_disp = uniform_filter1d(np.array(self.policy_loss_hist), size=5 * self.num_workers)
+        self.axs[1].plot(p_disp)
         self.axs[2].plot(uniform_filter1d(np.array(self.fitness_hist), size=5 * self.num_workers))
         mypause(.05)
 

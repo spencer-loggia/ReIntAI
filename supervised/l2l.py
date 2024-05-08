@@ -58,10 +58,9 @@ def l2l_loss(logits, targets, lfxn, classes=3, power=2, window=4):
     print(ce_loss)
     filt_ce_loss = conv_1d(ce_loss.view((1, 1, -1))).flatten()
     ce_loss = filt_ce_loss[1:] - filt_ce_loss[:-1].detach()
-    ce_loss = ce_loss + torch.relu(ce_loss) * 4
+    ce_loss = ce_loss + torch.relu(ce_loss)
     print(ce_loss)
     loss = torch.sum(ce_loss) #+ torch.pow(chance_ce - ce_loss[0], 2)
-    print(loss)
     return loss
 
 
@@ -77,7 +76,8 @@ def q_loss(val_est, targets, lfxn, gamma=.9):
 
 class Decoder:
 
-    def __init__(self,  train_labels=(3, 7), device="cpu", train_init=False, lr=1e-5):
+    def __init__(self,  train_labels=(3, 7), device="cpu", lr=1e-5):
+        self.lr = lr
         self.model = Intrinsic(num_nodes=5, node_shape=(1, 3, 9, 9), kernel_size=4, input_mode="overwrite", device=device)
         # self.model.init_weight = torch.nn.Parameter(torch.tensor([.01], device=device))
         self.train_labels = train_labels
@@ -85,13 +85,13 @@ class Decoder:
         self.internal_feedback_loss = torch.nn.BCELoss()
         if len(self.train_labels) > 2:
             raise ValueError("implemented for binary case only")
-        #else:
+        else:
             # is binary
-            # self.decoder = torch.nn.Linear(in_features=9*9, out_features=len(train_labels), device=device)
+            self.decoder = torch.nn.Linear(in_features=9*9, out_features=len(train_labels), device=device)
         self.optim = torch.optim.Adam(params=[self.model.resistance,
                                               self.model.edge.init_weight,
                                               self.model.edge.plasticity,
-                                              self.model.edge.chan_map], lr=lr)
+                                              self.model.edge.chan_map] + list(self.decoder.parameters()), lr=lr)
 
         self.history = []
 
@@ -102,22 +102,20 @@ class Decoder:
         img = (img - img.mean()) / img.std()
         in_states = torch.zeros_like(self.model.states)
         mask = in_states.bool()
-        for i in range(4):
+        for i in range(3):
             with torch.no_grad():
                 in_states[0, 0, :, :] = img.detach()
                 mask[0, 0, :, :] = True
             self.model(in_states.detach(), mask.detach())
-        in_features = self.model.states[2, :2, :, :]
-        logits = in_features.mean(dim=(1, 2)).flatten()  # self.decoder(in_features.view(1, 1, -1)).flatten() * .25
-        correct = 3 * (torch.argmax(logits, dim=0) == y) - 1
-        for i in range(4):
+        in_features = self.model.states[2, 0, :, :]
+        logits = self.decoder(in_features.view(1, 1, -1)).flatten()  # in_features.mean(dim=(1, 2)).flatten()  #
+        correct = 2 * (torch.argmax(logits, dim=0) == y) - 1.
+        for i in range(3):
             # in_states = torch.zeros_like(self.model.states)
             # mask = in_states.bool()
             in_states[1, 0, :] = correct
             mask[1, 0, :] = True
             self.model(in_states, mask.detach())
-        for i in range(1):
-            self.model()
         return logits
 
     def _fit(self, data, label_map, iter=100):
@@ -136,37 +134,47 @@ class Decoder:
             count += 1
         return torch.stack(all_logits, dim=0), torch.tensor(all_labels, device=self.device).long()
 
-    def l2l_fit(self, data, epochs=1000, batch_size=100, loss_mode="ce", reset_epochs=5, switch_order=True):
+    def l2l_fit(self, data, epochs=1000, batch_size=100, loss_mode="ce", reset_epochs=5):
         l_fxn = torch.nn.CrossEntropyLoss(reduce=False)
         data = DataLoader(data, shuffle=True, batch_size=1)
         loss = torch.tensor([0.], device=self.device)
+
+        std_model = self.instantiate()
+        flipped_model = self.instantiate()
+        flipped_model.train_labels = list(reversed(self.train_labels))
+
         for epoch in range(epochs):
-            if switch_order:
-                self.train_labels = list(reversed(self.train_labels))
             self.optim.zero_grad()
             if (epoch % reset_epochs) == 0:
-                self.model.detach(reset_intrinsic=True)
+                std_model.model.detach(reset_intrinsic=True)
+                flipped_model.model.detach(reset_intrinsic=True)
             else:
-                self.model.detach(reset_intrinsic=False)
-            logits, labels = self._fit(data, self.train_labels, batch_size)
+                std_model.model.detach(reset_intrinsic=False)
+                flipped_model.model.detach(reset_intrinsic=False)
+            logits, labels = std_model._fit(data, self.train_labels, batch_size)
+            f_logits, f_labels = flipped_model._fit(data, flipped_model.train_labels, batch_size)
             # loss = torch.sum(logits)
             if loss_mode == "ce":
                 l_loss = torch.mean(l_fxn(logits, labels))
+                fl_loss = torch.mean(l_fxn(f_logits, f_labels))
             elif loss_mode == "l2l":
                 l_loss =  l2l_loss(logits, labels, l_fxn)
+                fl_loss = l2l_loss(f_logits, f_labels, l_fxn)
             elif loss_mode == "both":
                 l_loss = .5 * l2l_loss(logits, labels, l_fxn) + .5 * torch.mean(l_fxn(logits, labels)) #
+                fl_loss = .5 * l2l_loss(f_logits, f_labels, l_fxn) + .5 * torch.mean(l_fxn(f_logits, f_labels))
             else:
                 raise ValueError
             reg = torch.sum(torch.pow(self.model.edge.chan_map, 2)) + torch.sum(torch.abs(self.model.edge.plasticity))
-            self.history.append(l_loss.detach().cpu().item())
+            self.history.append((l_loss.detach().cpu().item() + l_loss.detach().cpu().item()) / 2)
             print("Epoch", epoch, "loss is", self.history[-1])
-            loss = loss + l_loss + .001 * reg
+            loss = loss + l_loss + fl_loss + .001 * reg
             print('REG', .001 * reg)
             if (epoch + 1) % 2 == 0:
                 # init_plast = self.model.edge.chan_map.clone()
                 loss.backward()
                 self.optim.step()
+                # sched.step()
                 loss = torch.zeros_like(loss)
             # print("change:", init_plast - self.model.edge.chan_map.clone())
 
@@ -200,9 +208,15 @@ class Decoder:
 
     def to(self, device):
         self.device = device
-        #self.decoder = self.decoder.to(device)
+        self.decoder = self.decoder.to(device)
         self.model = self.model.to(device)
         return self
+
+    def instantiate(self):
+        new_model = Decoder(train_labels=self.train_labels, device=self.device, lr=self.lr)
+        new_model.model = self.model.instantiate()
+        new_model.decoder = self.decoder.clone()
+        return new_model
 
 
 

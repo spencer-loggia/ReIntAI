@@ -102,8 +102,11 @@ class Intrinsic:
     def detach(self, reset_intrinsic=False):
         # detach computational graph
         self.edge.detach(reset_weight=reset_intrinsic)
-        states = torch.zeros_like(self.states)
-        self.states = torch.nn.init.xavier_normal_(states)
+        if reset_intrinsic:
+            states = torch.zeros_like(self.states)
+            self.states = torch.nn.init.xavier_normal_(states)
+        else:
+            self.states = self.states.detach().clone()
         self.past_states = []
         return self
 

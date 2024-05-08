@@ -64,7 +64,7 @@ class PlasticEdges():
         self.folder = torch.nn.Fold(kernel_size=self.kernel_size,
                                     output_size=(spatial1, spatial2),
                                     padding=self.pad)
-        self.debug = debug
+        self.debug = False
 
     def _expand_base_weights(self, in_weight):
         # adds explicit spatial dims to weights
@@ -124,7 +124,9 @@ class PlasticEdges():
 
         # add random noise to chan map to prevent it from becoming nonsingular
         chan_mod = torch.empty_like(self.chan_map)
-        self.chan_mod = torch.nn.init.xavier_normal_(chan_mod) * .1
+        self.chan_mod = (torch.nn.init.xavier_normal_(chan_mod) * .001 -
+                         torch.eye(self.channels,self.channels,
+                                   device=self.device).view((1, 1, self.channels, self.channels)) * .001)
         # self.chan_map = self.chan_map + chan_mod
 
         # Compose plastic weights and channel map
@@ -182,11 +184,12 @@ class PlasticEdges():
             (1, self.num_nodes * self.channels, self.num_nodes * self.channels))
 
         # This is a fast and  numerically stable equivalent to (chan_map ^ -1) (target_activations)
-        inv, info = torch.linalg.solve_ex(chan_map, target_activations)
-        target_meta_activations = torch.sigmoid(inv)
-        target_meta_activations = target_meta_activations.transpose(0, 1).reshape(self.num_nodes, self.channels,
-                                                                                  self.spatial1,
-                                                                                  self.spatial2)  # u, c, s, s
+        # inv, info = torch.linalg.solve_ex(chan_map, target_activations)
+        # target_meta_activations = torch.sigmoid(inv)
+        # target_meta_activations = target_meta_activations.transpose(0, 1).reshape(self.num_nodes, self.channels,
+        #                                                                           self.spatial1,
+        #                                                                           self.spatial2)  # u, c, s, s
+        target_meta_activations = torch.sigmoid(target_activations)
 
         # unfold the current remapped activations
         ufld_target = self.unfolder(target_meta_activations).transpose(1,
@@ -322,7 +325,7 @@ class FCPlasticEdges():
         self.plasticity = torch.nn.Parameter(
             torch.ones((num_nodes, num_nodes, channels, channels), device=device) * init_plasticity)
         self.device = device
-        self.debug = debug
+        self.debug = False
         self.kernel_size = None
 
     def _expand_base_weights(self, in_weight):
@@ -401,26 +404,28 @@ class FCPlasticEdges():
         target_activations = target_activation.reshape(self.num_nodes * self.channels,
                                                     self.spatial, 1).transpose(0, 1)  # (_, s, nc)
 
-        chan_map = self.chan_map.permute((0, 2, 1, 3)).reshape(
-            (1, self.num_nodes * self.channels, self.num_nodes * self.channels))
-
-        # This is a fast and  numerically stable equivalent to (chan_map ^ -1) (target_activations)
-        target_meta_activations = torch.sigmoid(torch.linalg.solve(chan_map, target_activations))
-        target_meta_activations = target_meta_activations.transpose(0, 1).reshape(self.num_nodes, self.channels,
-                                                                                  self.spatial)  # v, c, s
+        # chan_map = self.chan_map.permute((0, 2, 1, 3)).reshape(
+        #     (1, self.num_nodes * self.channels, self.num_nodes * self.channels))
+        #
+        # # This is a fast and  numerically stable equivalent to (chan_map ^ -1) (target_activations)
+        # target_meta_activations = torch.linalg.solve(chan_map, torch.sigmoid(target_activations))
+        # target_meta_activations = target_meta_activations.transpose(0, 1).reshape(self.num_nodes, self.channels,
+        #                                                                           self.spatial)  # v, c, s
+        target_meta_activations = torch.sigmoid(target_activations)
 
         # unfold the current remapped activations
         # u, c, s
         activ_mem = self.activation_memory  # u, c, s
         coactivation = torch.outer(target_meta_activations.flatten(), activ_mem.flatten())
-        coactivation = torch.exp(coactivation).view(
+        coactivation = coactivation.view(
             (self.num_nodes, self.channels, self.spatial, self.num_nodes, self.channels, self.spatial))
         coactivation = torch.permute(coactivation, (0, 3, 2, 5, 1, 4))  # u, v, s, s, c, c
 
         plasticity = self.plasticity.view(self.num_nodes, self.num_nodes, 1, 1, self.channels, self.channels).clone()
         if self.debug:
             plasticity.register_hook(lambda grad: print("plast", grad.reshape(grad.shape[0], -1).sum(dim=-1)))
-        self.weight = torch.log((1 - plasticity) * torch.exp(self.weight) + plasticity * coactivation)
+        self.weight = (1 - plasticity) * self.weight + plasticity * coactivation
+        # self.weight = torch.log((1 - plasticity) * torch.exp(self.weight) + plasticity * coactivation)
         return
 
     def instantiate(self):

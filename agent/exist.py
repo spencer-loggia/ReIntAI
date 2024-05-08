@@ -6,7 +6,7 @@ import torch
 
 from pettingzoo.sisl import waterworld_v4
 
-def episode(base_agents, copies, min_cycles=800, max_cycles=800, sensors=20, human=False, device="cpu", max_acc=.25,
+def episode(base_agents, copies, min_cycles=1500, max_cycles=1500, sensors=20, human=False, device="cpu", max_acc=.25,
             action_dist="weighted_dist"):
     """
     Function to run launch and take action in the waterworld environment
@@ -145,17 +145,13 @@ def local_evolve(q, generations, base_agents, copies, reward_function, train_act
                     continue
                 if not (agent_info["failure"]) and not stat_tracker[agent_info["base_name"]]["failure"]:
                     # whether to train critic only when random action is taken.
-                    if critic_random_only:
-                        is_random = torch.Tensor(agent_info["is_random"], device=device)
-                    else:
-                        is_random = torch.Tensor([True]*len(agent_info["is_random"]), device=device)
+                    is_random = torch.Tensor(agent_info["is_random"], device=device)
 
                     if reward_function.__name__ == "ActorCritic":
                         val_loss, policy_loss = reward_function.loss(torch.Tensor(agent_info["inst_r"], device=device),
                                                                                torch.concat(agent_info["value"], dim=0),
                                                                                torch.stack(agent_info["action_likelihood"], dim=0),
-                                                                               torch.stack(agent_info["entropy"], dim=0),
-                                                                               is_random)
+                                                                               torch.stack(agent_info["entropy"], dim=0))
                     elif reward_function.__name__ == "Reinforce":
                         policy_loss = reward_function.loss(torch.Tensor(agent_info["inst_r"], device=device),
                                                                                torch.stack(agent_info["action_likelihood"], dim=0),
@@ -170,15 +166,15 @@ def local_evolve(q, generations, base_agents, copies, reward_function, train_act
                         print("NaN is gradient!", agent_info["base_name"])
                         stat_tracker[agent_info["base_name"]]["failure"] = True
                         fail_tracker[agent_info["base_index"]] = True
-                    stat_tracker[agent_info["base_name"]]["value_loss"][-1].append((val_loss / torch.count_nonzero(is_random)).detach().cpu().item())
+                    stat_tracker[agent_info["base_name"]]["value_loss"][-1].append((val_loss / len(is_random)).detach().cpu().item())
                     stat_tracker[agent_info["base_name"]]["policy_loss"][-1].append((policy_loss / len(is_random)).detach().cpu().item())
                     stat_tracker[agent_info["base_name"]]["copies"] += weight
-                    a = .01
-                    b = .05
-                    if train_act:
-                        a = 0.0
-                    if train_critic:
+                    a = .1
+                    b = .1
+                    if not train_act:
                         b = 0.0
+                    if not train_critic:
+                        a = 0.0
                     total_loss[agent_info["base_index"]] = (total_loss[agent_info["base_index"]] + a * val_loss
                                                             + b * policy_loss)
                 else:
@@ -201,14 +197,14 @@ def local_evolve(q, generations, base_agents, copies, reward_function, train_act
             for i in range(num_base):
                 if not fail_tracker[i]:
                     a = base_agents[i]
-                    reg = torch.sum(torch.abs(a.input_encoder))
-                    reg = reg + torch.sum(torch.abs(a.core_model.edge.init_weight))
-                    reg = reg + torch.sum(torch.abs(a.core_model.edge.chan_map))
-                    if train_critic:
-                        reg = reg + torch.sum(torch.abs(a.value_decoder))
-                    if train_act:
-                        reg = reg + torch.sum(torch.abs(a.policy_decoder))
-                    total_loss[i] = total_loss[i] + .0001 * reg
+                    # reg = torch.sum(torch.abs(a.input_encoder))
+                    # reg = reg + torch.sum(torch.abs(a.core_model.edge.init_weight))
+                    # reg = reg + torch.sum(torch.abs(a.core_model.edge.chan_map))
+                    # if train_critic:
+                    #     reg = reg + torch.sum(torch.abs(a.value_decoder))
+                    # if train_act:
+                    #     reg = reg + torch.sum(torch.abs(a.policy_decoder))
+                    # total_loss[i] = total_loss[i] + .0001 * reg
                     total_loss[i].backward()
                     for j, p in enumerate(a.parameters()):
                         if not torch.isnan(p.grad).any():
@@ -228,7 +224,7 @@ def local_evolve(q, generations, base_agents, copies, reward_function, train_act
                 if stat_tracker[k]["fitness"] is not None:
                     stat_tracker[k]["fitness"] = np.mean(stat_tracker[k]["fitness"])
         q.put((stat_tracker, reward_function, proc))
-    except IndexError as e:
+    except Exception as e:
         # on any exception we return the pid so proc can be killed
         print("CAUGHT in local_evolve\n", e, "\n")
         q.put((None, None, proc))
