@@ -1,6 +1,8 @@
 from agent.agents import WaterworldAgent, DisjointWaterWorldAgent, FCWaterworldAgent
 from agent.evolve import EvoController
 import pickle
+import torch.multiprocessing as mp
+mp.set_start_method('spawn', force=True)
 
 if __name__=="__main__":
     FC_AGENT = True
@@ -34,6 +36,6 @@ if __name__=="__main__":
 
     evo = EvoController(seed_agent=agent, epochs=EPOCHS, num_base=4, num_workers=10,
                         min_agents=1, max_agents=3, min_gen=1, max_gen=1, log_min_lr=LOG_MIN_LR, log_max_lr=LOG_MAX_LR,
-                        algo=ALGORITM, start_epsilon=EPSILON_START, inverse_eps_decay=EPSILON_DECAY, worker_device="cpu")
+                        algo=ALGORITM, start_epsilon=EPSILON_START, inverse_eps_decay=EPSILON_DECAY, worker_device="cpu", viz=False)
     # evo.load_model("/Users/loggiasr/Projects/ReIntAI/models/fc_evo_32/snap_4500_5.52_.pkl")
     evo.controller(mp=True, fbase=path)

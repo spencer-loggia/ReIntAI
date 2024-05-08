@@ -96,6 +96,7 @@ class EvoController:
         self.optimizers = {}
         self.last_grad = {seed_agent.id: [0. for _ in seed_agent.parameters()]}
         self.worker_device = worker_device
+        self.device = seed_agent.device
         self.num_integrations = 0
         self.evo_tree = networkx.DiGraph()
         self.evo_tree.add_node(seed_agent.id, fitness=[], vloss=[], ploss=[], copies=[], entropy=[])
@@ -148,12 +149,12 @@ class EvoController:
             recv, sender = Pipe(duplex=False)
             p = Process(target=local_evolve,
                         args=(integration_q, recv, num_gens, use_base, copies.tolist(), self.reward_function, train_actor,
-                              train_critic, train_critic_random_only, pid))
+                              train_critic, train_critic_random_only, pid, self.worker_device))
 
             return p, sender
         else:
             local_evolve(integration_q, None, num_gens, use_base, copies.tolist(), self.reward_function, train_actor,
-                         train_critic, train_critic_random_only, pid)
+                         train_critic, train_critic_random_only, pid, self.worker_device)
             return None, None
 
     def multiclone(self, agent1, agent2, equal=False):
@@ -255,7 +256,8 @@ class EvoController:
             self.optimizers[id].zero_grad()
             grads = stats[id]["gradient"]
             for j, g in enumerate(grads):
-                self.last_grad[id][j] = .6 * self.last_grad[id][j] + .4 * g
+                # send gradient back to gpu from cpu
+                self.last_grad[id][j] = .6 * self.last_grad[id][j] + .4 * g.to(self.device)
             self.base_agent[i].set_grad(self.last_grad[id])  # sets parameter gradient attributes
             before_plast = self.base_agent[i].core_model.edge.chan_map.detach().clone()
             self.optimizers[id].step()
@@ -325,10 +327,10 @@ class EvoController:
         use_agent[0].epsilon = 0. # max(-(1/decay_by) * self.full_count + 1.0, .01)
         copies = [1]
         if mp:
-            p = Process(target=episode, args=(use_agent, copies, 2000, 2000, 20, True, "cpu"))
+            p = Process(target=episode, args=(use_agent, copies, 2000, 2000, 20, True, self.worker_device))
             return p
         else:
-            episode(use_agent, copies, 400, 400, 20, True, "cpu")
+            episode(use_agent, copies, 400, 400, 20, True, self.worker_device)
             return
 
     def save_model(self, iter, fbase: str):
@@ -368,7 +370,7 @@ class EvoController:
         except KeyError:
             print("No reward fxn in saved dict.")
 
-    def controller(self, mp=True, disp_iter=500, fbase="/Users/loggiasr/Projects/ReIntAI/models/evo_7"):
+    def controller(self, mp=True, disp_iter=500, fbase="/users/jkim116/data/jkim116/ReinAI/ReIntAI/models/testOscar"):
         num_workers = self.num_workers
         workers = {}
         epoch = 0

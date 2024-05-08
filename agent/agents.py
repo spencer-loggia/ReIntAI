@@ -258,7 +258,7 @@ class FCWaterworldAgent(WaterworldAgent):
         self.input_encoder = torch.nn.Parameter(input_encoder)
         self.input_encoder_bias = torch.nn.Parameter(torch.zeros((1,), device=self.device) + .001)
 
-        self.core_model = FCIntrinsic(num_nodes=4, node_shape=(1, self.channels, self.spatial))
+        self.core_model = FCIntrinsic(num_nodes=4, node_shape=(1, self.channels, self.spatial), device=self.device)
         self.kernel_size = None
 
     def parameters(self):
@@ -285,6 +285,7 @@ class FCWaterworldAgent(WaterworldAgent):
         :param r: instant reward form last state
         :return: Mu, Sigma, Value - the mean and variance of the action distribution, and the state value estimate
         """
+        X = X.to(self.device)
         # create a state matrix for injection into core from input observation
         encoded_input = ((X + self.input_encoder_bias) @ self.input_encoder).view(self.spatial, self.input_channels).transpose(0, 1)
         in_states = torch.zeros_like(self.core_model.states)
