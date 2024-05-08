@@ -8,12 +8,10 @@ import matplotlib
 import matplotlib.pyplot as plt
 import randomname
 
-matplotlib.use('Qt5Agg')
-
 import numpy as np
 import torch
 torch.set_default_dtype(torch.float64)
-from torch.multiprocessing import Queue, Process
+from torch.multiprocessing import Queue, Process, Pipe
 from collections import deque
 
 from agent.agents import WaterworldAgent, DisjointWaterWorldAgent, FCWaterworldAgent
@@ -147,14 +145,16 @@ class EvoController:
         print("OPTIM:", num_gens, "generations,", num_agents, "agents of types:", [a.id for a in use_base])
         train_critic_random_only = False
         if mp:
+            recv, sender = Pipe(duplex=False)
             p = Process(target=local_evolve,
-                        args=(integration_q, num_gens, use_base, copies.tolist(), self.reward_function, train_actor,
+                        args=(integration_q, recv, num_gens, use_base, copies.tolist(), self.reward_function, train_actor,
                               train_critic, train_critic_random_only, pid))
-            return p
+
+            return p, sender
         else:
-            local_evolve(integration_q, num_gens, use_base, copies.tolist(), self.reward_function, train_actor,
+            local_evolve(integration_q, None, num_gens, use_base, copies.tolist(), self.reward_function, train_actor,
                          train_critic, train_critic_random_only, pid)
-            return None
+            return None, None
 
     def multiclone(self, agent1, agent2, equal=False):
         new_agent = self.agent_class(num_nodes=agent1.core_model.num_nodes,
@@ -384,22 +384,25 @@ class EvoController:
             if mp:
                 for k in to_kill:
                     try:
-                        workers[k].join()
+                        # send termination signal down pipe
+                        pipe = workers[k][1]
+                        pipe.send(True)
+                        workers[k][0].join()
                         workers.pop(k)
                     except KeyError:
                         print("Worker to kill DNE - possible zombie")
                 to_kill = set()
                 if len(workers) < num_workers and epoch <= self.epochs:
                     pid = "".join(random.choices("ABCDEFG1234567", k=5))
-                    if (epoch) % disp_iter == 0:
+                    if (epoch + 1) % disp_iter == 0:
                         print("Episode Display Worker", pid)
                         if epoch != 0:
                             self.save_model(epoch, fbase)
                         p = self.spawn_visualization_worker(mp=False)
                     else:
                         print("Worker", pid, "handling epoch", epoch)
-                        p = self.spawn_worker(integration_q, pid)
-                        workers[pid] = p
+                        p, pipe = self.spawn_worker(integration_q, pid)
+                        workers[pid] = (p, pipe)  # worker gets piped yay
                         p.start()
                     epoch += 1
                     self.full_count += 1
@@ -421,7 +424,7 @@ class EvoController:
                 if self.viz and (epoch + 1) % (disp_iter // 10) == 0:
                     self.visualize()
         for k in workers.keys():
-            workers[k].join()
+            workers[k][0].join()
         print("DONE: one last visualization...")
 
         if self.viz:

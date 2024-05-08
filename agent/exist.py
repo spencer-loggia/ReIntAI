@@ -117,7 +117,7 @@ def episode(base_agents, copies, min_cycles=1500, max_cycles=1500, sensors=20, h
     return agent_dict, scores
 
 
-def local_evolve(q, generations, base_agents, copies, reward_function, train_act=True, train_critic=True, critic_random_only=False, proc=0, device="cpu"):
+def local_evolve(q, pipe, generations, base_agents, copies, reward_function, train_act=True, train_critic=True, critic_random_only=False, proc=0, device="cpu"):
     try:
         num_base = len(base_agents)
 
@@ -228,5 +228,10 @@ def local_evolve(q, generations, base_agents, copies, reward_function, train_act
         # on any exception we return the pid so proc can be killed
         print("CAUGHT in local_evolve\n", e, "\n")
         q.put((None, None, proc))
-    return
+    if pipe is None:
+        return
+    elif pipe.recv():
+        # wait for parent to signal done with data.
+        return
+    raise RuntimeError("Worker", proc, "was never signalled to die.")
 
