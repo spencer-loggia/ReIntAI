@@ -3,3 +3,6 @@
 *DStore*
 *cache*
 *checkpoint*
+tmp
+runner.py
+l2l_runner.py
