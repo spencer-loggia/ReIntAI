@@ -6,7 +6,7 @@ import torch
 
 from pettingzoo.sisl import waterworld_v4
 
-def episode(base_agents, copies, min_cycles=1500, max_cycles=1500, sensors=20, human=False, device="cpu", max_acc=.25,
+def episode(base_agents, copies, min_cycles=1500, max_cycles=1500, sensors=20, human=False, device="cpu", max_acc=.5,
             action_dist="weighted_dist"):
     """
     Function to run launch and take action in the waterworld environment
