@@ -156,7 +156,7 @@ def local_evolve(q, pipe, generations, base_agents, copies, reward_function, tra
                         policy_loss = reward_function.loss(torch.tensor(agent_info["inst_r"], device=device),
                                                                                torch.stack(agent_info["action_likelihood"], dim=0),
                                                                                torch.stack(agent_info["entropy"], dim=0))
-                        val_loss = torch.tensor([0.])
+                        val_loss = torch.tensor([2.], device=device)
                     else:
                         raise ValueError("undefined reward function")
 
