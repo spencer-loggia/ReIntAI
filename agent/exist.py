@@ -207,13 +207,15 @@ def local_evolve(q, pipe, generations, base_agents, copies, reward_function, tra
                     # total_loss[i] = total_loss[i] + .0001 * reg
                     total_loss[i].backward()
                     for j, p in enumerate(a.parameters()):
-                        if not torch.isnan(p.grad).any():
+                        if p.grad is None:
+                            stat_tracker[a.id]["gradient"][j] += torch.zeros_like(p.data)
+                        elif not torch.isnan(p.grad).any():
                             # send gradient to cpu
                             stat_tracker[a.id]["gradient"][j] += p.grad.detach().cpu()
                         else:
                             print("NaN grad", a.id)
                             stat_tracker[a.id]["failure"] = True
-                            stat_tracker[a.id]["gradient"][j] += torch.zeros_like(p.grad)
+                            stat_tracker[a.id]["gradient"][j] += torch.zeros_like(p.data)
                             fail_tracker[i] = True
         # average and cast to numpy
         for k in stat_tracker.keys():
