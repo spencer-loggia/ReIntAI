@@ -169,7 +169,7 @@ def local_evolve(q, pipe, generations, base_agents, copies, reward_function, tra
                     stat_tracker[agent_info["base_name"]]["value_loss"][-1].append((val_loss / len(is_random)).detach().cpu().item())
                     stat_tracker[agent_info["base_name"]]["policy_loss"][-1].append((policy_loss / len(is_random)).detach().cpu().item())
                     stat_tracker[agent_info["base_name"]]["copies"] += weight
-                    a = .01
+                    a = .002
                     b = .1
                     if not train_act:
                         b = 0.0

@@ -125,7 +125,7 @@ class EvoController:
         select_base_idx = np.random.choice(np.arange(len(self.base_agent)), size=num_agents)
         use_base_idx, copies = np.unique(select_base_idx, return_counts=True)
         use_base = []
-        self.reward_function.alpha = max(.075 * self.decay * self.full_count + .3, .001)
+        self.reward_function.alpha = max(.13 * self.decay * self.full_count + .3, .001)
         local_eps = max(self.decay * self.full_count + self.epsilon, 0)
         for i in use_base_idx:
             a = self.base_agent[i].clone(fuzzy=False)
