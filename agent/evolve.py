@@ -194,7 +194,7 @@ class EvoController:
     def survival(self):
         # select the most fit in the overall pool.
         # all_agents = [a.clone(fuzzy=False) for a in self.base_agent]
-        kill_prob = 1 / (6 * self.num_workers)
+        kill_prob = 1 / (6 * max(self.num_workers, 7))
         if random.random() > kill_prob:
             return
         # num_survivors = min(self.num_base - 1, math.ceil(self.num_base * .75))
