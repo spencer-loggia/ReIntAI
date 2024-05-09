@@ -202,9 +202,10 @@ class WaterworldAgent:
             out_states = self.core_model(in_states, mask)
         # compute next action and value estimates
         action_params = (out_states[1, 0, :, :].flatten() + self.policy_decoder_bias) @ self.policy_decoder
-        value_est = (out_states[2, 0, :, :].flatten() + self.value_decoder_bias) @ self.value_decoder
-        c1 = torch.pow(action_params[0:2], 2) + 1.0
-        c2 = torch.pow(action_params[2:], 2) + 1.0
+        value_est = (out_states[1, 0, :, :].flatten() + self.value_decoder_bias) @ self.value_decoder
+        act_fxn = torch.nn.ReLU()
+        c1 = act_fxn(action_params[0:2]) + 1.0
+        c2 = act_fxn(action_params[2:]) + 1.0
         return c1, c2, value_est
 
 

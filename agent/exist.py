@@ -6,7 +6,7 @@ import torch
 
 from pettingzoo.sisl import waterworld_v4
 
-def episode(base_agents, copies, min_cycles=1500, max_cycles=1500, sensors=20, human=False, device="cpu", max_acc=.5,
+def episode(base_agents, copies, min_cycles=800, max_cycles=800, sensors=20, human=False, device="cpu", max_acc=.5,
             action_dist="weighted_dist"):
     """
     Function to run launch and take action in the waterworld environment
@@ -32,12 +32,12 @@ def episode(base_agents, copies, min_cycles=1500, max_cycles=1500, sensors=20, h
     if human:
         env = waterworld_v4.parallel_env(render_mode="human", n_pursuers=num_agents, n_coop=1,
                                          n_sensors=sensors, max_cycles=cycles, speed_features=False,
-                                         pursuer_max_accel=max_acc, encounter_reward=0.1, food_reward=8.0,
+                                         pursuer_max_accel=max_acc, encounter_reward=0.1, food_reward=6.0,
                                          poison_reward=-3.5, thrust_penalty=-.001)
     else:
         env = waterworld_v4.parallel_env(n_pursuers=num_agents, n_coop=1, n_sensors=sensors,
                                          max_cycles=cycles, speed_features=False, pursuer_max_accel=max_acc,
-                                         encounter_reward=0.1, food_reward=8.0, poison_reward=-3.5,
+                                         encounter_reward=0.1, food_reward=6.0, poison_reward=-3.5,
                                          thrust_penalty=-.001)
     env.reset()
     agent_dict = {}
@@ -169,7 +169,7 @@ def local_evolve(q, pipe, generations, base_agents, copies, reward_function, tra
                     stat_tracker[agent_info["base_name"]]["value_loss"][-1].append((val_loss / len(is_random)).detach().cpu().item())
                     stat_tracker[agent_info["base_name"]]["policy_loss"][-1].append((policy_loss / len(is_random)).detach().cpu().item())
                     stat_tracker[agent_info["base_name"]]["copies"] += weight
-                    a = .1
+                    a = .01
                     b = .1
                     if not train_act:
                         b = 0.0

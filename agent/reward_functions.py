@@ -54,7 +54,7 @@ class ActorCritic:
         if not torch.isnan(mean + std):
             self.mean = self.mean * sg + (1 - sg) * mean.item()
             self.std = self.std * sg + (1 - sg) * (std.item())
-        # returns = (returns - self.mean) / (self.std + 1e-8)
+        returns = (returns - self.mean) / (self.std + 1e-8)
         # compute advantages
         advantages = returns - value_estimates[:cutoff]
         # Calculate the critic loss, only where actions are random

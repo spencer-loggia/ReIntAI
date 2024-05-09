@@ -76,9 +76,9 @@ class EvoController:
         self.viz=viz
         self.algo = algo
         if algo == "a3c":
-            self.reward_function = ActorCritic(gamma=.93, alpha=.2)
+            self.reward_function = ActorCritic(gamma=.93, alpha=.4)
         elif algo == "reinforce":
-            self.reward_function = Reinforce(gamma=.93, alpha=.2)
+            self.reward_function = Reinforce(gamma=.93, alpha=.4)
         else:
             raise ValueError
         self.full_count = 0
@@ -125,13 +125,13 @@ class EvoController:
         select_base_idx = np.random.choice(np.arange(len(self.base_agent)), size=num_agents)
         use_base_idx, copies = np.unique(select_base_idx, return_counts=True)
         use_base = []
-        self.reward_function.alpha = max(.075 * self.decay * self.full_count + .2, .005)
+        self.reward_function.alpha = max(.075 * self.decay * self.full_count + .3, .001)
         local_eps = max(self.decay * self.full_count + self.epsilon, 0)
         for i in use_base_idx:
             a = self.base_agent[i].clone(fuzzy=False)
             force_explore = random.random()
-            if random.random() < .14 and force_explore > local_eps:
-                a.epsilon = random.random() * .8
+            if random.random() < .12 and force_explore > local_eps:
+                a.epsilon = force_explore * .8
             else:
                 a.epsilon = local_eps + (random.random() * .02)
             use_base.append(a)
@@ -168,7 +168,7 @@ class EvoController:
                 new_core_1 = agent1.core_model.clone(fuzzy=False)
                 lincomb = .5
             else:
-                new_core_1 = agent1.core_model.clone(fuzzy=True)
+                new_core_1 = agent1.core_model.clone(fuzzy=False)
                 lincomb = random.random() * 2
             new_core_1.edge.chan_map = torch.nn.Parameter((1 - lincomb) * new_core_1.edge.chan_map.detach() +
                                                           lincomb * agent2.core_model.edge.chan_map.detach())
@@ -281,8 +281,8 @@ class EvoController:
         next_gen = []
         for i in range(self.num_base - num_survivors):
             parent1 = random.choice(self.base_agent)
-            parent2 = parent1
-            if random.random() < .75:
+            parent2 = random.choice(self.base_agent)
+            if random.random() < .5:
                 child = self.multiclone(parent1, parent2, equal=True)
             else:
                 child = self.multiclone(parent1, parent2)
@@ -296,7 +296,7 @@ class EvoController:
                 fit = _compute_loss_values(self.evo_tree.nodes[p.id]["fitness"], cp) / 2
                 v = _compute_loss_values(self.evo_tree.nodes[p.id]["vloss"], cp) / 2
                 pl = _compute_loss_values(self.evo_tree.nodes[p.id]["ploss"], cp) / 2
-                fit = fit - .001
+                fit = fit - .002
                 v = v * 1.0
                 if child.id in self.evo_tree.nodes:
                     self.evo_tree.nodes[child.id]["fitness"][-1] += fit
