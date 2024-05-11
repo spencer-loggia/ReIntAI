@@ -42,7 +42,7 @@ if __name__=="__main__":
             in_enc = pickle.load(f)
         agent.input_encoder = in_enc.to(torch.float64)
 
-    evo = EvoController(seed_agent=agent, epochs=EPOCHS, num_base=1, num_workers=10,
+    evo = EvoController(seed_agent=agent, epochs=EPOCHS, num_base=5, num_workers=10,
                         min_agents=1, max_agents=3, min_gen=1, max_gen=1, log_min_lr=LOG_MIN_LR, log_max_lr=LOG_MAX_LR,
                         algo=ALGORITM, start_epsilon=EPSILON_START, inverse_eps_decay=EPSILON_DECAY, worker_device="cpu")
     # evo.load_model("/Users/loggiasr/Projects/ReIntAI/models/evo_7/snap_8500_13.59_.pkl")
