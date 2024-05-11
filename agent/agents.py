@@ -28,7 +28,7 @@ class WaterworldAgent:
         :param args:
         :param kwargs:
         """
-        super().__init__(*args, **kwargs)
+        super().__init__()
         self.id = randomname.get_name()
         self.debug = False
         self.generation = 0.
@@ -246,8 +246,16 @@ class FCWaterworldAgent(WaterworldAgent):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.value_decoder = torch.empty((self.spatial, 1), device=self.device)
-        self.value_decoder = torch.nn.Parameter(torch.nn.init.xavier_normal_(self.value_decoder))
+        if "decode_node" in kwargs:
+            self.decode_node = kwargs["decode_node"]
+        else:
+            self.decode_node = 2
+        if self.decode_node is None:
+            self.value_decoder = torch.empty((self.input_size, 1), device=self.device)
+            self.value_decoder = torch.nn.Parameter(torch.nn.init.xavier_normal_(self.value_decoder))
+        else:
+            self.value_decoder = torch.empty((self.spatial, 1), device=self.device)
+            self.value_decoder = torch.nn.Parameter(torch.nn.init.xavier_normal_(self.value_decoder))
         self.value_decoder_bias = torch.nn.Parameter(torch.zeros((1,), device=self.device) + .001)
 
         self.policy_decoder = torch.empty((self.spatial, 4), device=self.device)
@@ -301,7 +309,11 @@ class FCWaterworldAgent(WaterworldAgent):
             out_states = self.core_model(in_states, mask)
         # compute next action and value estimates
         action_params = out_states[1, 0, :].flatten() @ self.policy_decoder + self.policy_decoder_bias
-        value_est = (out_states[2, 0, :].flatten() @ self.value_decoder).flatten() + self.value_decoder_bias # out_states[2, 0, :, :].flatten() @ self.value_decoder
+        if self.decode_node is None:
+            critic_in = X.flatten().double()
+        else:
+            critic_in = out_states[self.decode_node, 0, :].flatten()
+        value_est = (critic_in.detach() @ self.value_decoder).flatten() + self.value_decoder_bias # out_states[2, 0, :, :].flatten() @ self.value_decoder
         if self.debug:
             value_est.register_hook(lambda grad: print("Grad Val Est", torch.abs(grad).sum()))
         c1 = torch.relu(action_params[0:2]) + 1.0
@@ -312,7 +324,7 @@ class FCWaterworldAgent(WaterworldAgent):
         new_agent = FCWaterworldAgent(num_nodes=self.core_model.num_nodes,
                                     channels=self.channels, spatial=self.spatial, sensors=self.num_sensors,
                                     action_dim=self.action_dim,
-                                    device=self.device, input_channels=self.input_channels)
+                                    device=self.device, input_channels=self.input_channels, decode_node=self.decode_node)
         if not fuzzy:
             new_agent.id = self.id
             new_agent.version = self.version
@@ -336,7 +348,7 @@ class FCWaterworldAgent(WaterworldAgent):
         new_agent = FCWaterworldAgent(num_nodes=self.core_model.num_nodes,
                                     channels=self.channels, spatial=self.spatial, sensors=self.num_sensors,
                                     action_dim=self.action_dim,
-                                    device=self.device, input_channels=self.input_channels)
+                                    device=self.device, input_channels=self.input_channels, decode_node=self.decode_node)
         new_core = self.core_model.instantiate()
         new_agent.core_model = new_core
         new_agent.policy_decoder = self.policy_decoder.clone()
@@ -373,4 +385,3 @@ class FCWaterworldAgent(WaterworldAgent):
 
         plt.plot(loss_hist)
         plt.show()
-

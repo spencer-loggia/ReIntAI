@@ -81,7 +81,7 @@ class Intrinsic:
         :return:
         """
         h = self.states - 1  # + torch.normal(0, self.noise, self.states.shape)  # inject noise (and subtract 1?)
-        self.edge.update(h)  # do local weight update
+        self.edge.update(h)  # send current activation do local weight update
         out_activ = self.edge(h).clone()  # get output from all edges.
 
         if x is not None:

@@ -6,7 +6,7 @@ import torch
 
 from pettingzoo.sisl import waterworld_v4
 
-def episode(base_agents, copies, min_cycles=800, max_cycles=800, sensors=20, human=False, device="cpu", max_acc=.5,
+def episode(base_agents, copies, min_cycles=1000, max_cycles=1000, sensors=20, human=False, device="cpu", max_acc=.5,
             action_dist="weighted_dist"):
     """
     Function to run launch and take action in the waterworld environment
@@ -169,7 +169,7 @@ def local_evolve(q, pipe, generations, base_agents, copies, reward_function, tra
                     stat_tracker[agent_info["base_name"]]["value_loss"][-1].append((val_loss / len(is_random)).detach().cpu().item())
                     stat_tracker[agent_info["base_name"]]["policy_loss"][-1].append((policy_loss / len(is_random)).detach().cpu().item())
                     stat_tracker[agent_info["base_name"]]["copies"] += weight
-                    a = .002
+                    a = .02
                     b = .1
                     if not train_act:
                         b = 0.0

@@ -20,7 +20,7 @@ from agent.exist import local_evolve, episode
 from scipy.ndimage import uniform_filter1d
 
 
-def _compute_loss_values(arr, copies=None, window=25):
+def _compute_loss_values(arr, copies=None, window=30):
     len_hist = len(arr)
     start = min(len_hist, window)
     arr = np.array(arr[-start:], dtype=float)
@@ -30,7 +30,7 @@ def _compute_loss_values(arr, copies=None, window=25):
         copies = np.array(copies[-start:], dtype=float)
         copies = copies / np.sum(copies)
         score = np.nansum(arr * copies)
-    return score
+    return score * (start / window)
 
 def mypause(interval):
     backend = plt.rcParams['backend']
@@ -66,6 +66,7 @@ class EvoController:
                  log_min_lr=-13., log_max_lr=-8., num_workers=6, worker_device="cpu", viz=True,
                  algo="a3c", start_epsilon=1.0, inverse_eps_decay=4000):
         self.num_base = num_base
+        self.start_base = num_base
         self.log_min_lr = log_min_lr
         self.log_max_lr = log_max_lr
         self.epochs = epochs
@@ -76,9 +77,9 @@ class EvoController:
         self.viz=viz
         self.algo = algo
         if algo == "a3c":
-            self.reward_function = ActorCritic(gamma=.93, alpha=.4)
+            self.reward_function = ActorCritic(gamma=.96, alpha=.4)
         elif algo == "reinforce":
-            self.reward_function = Reinforce(gamma=.93, alpha=.4)
+            self.reward_function = Reinforce(gamma=.95, alpha=.4)
         else:
             raise ValueError
         self.full_count = 0
@@ -125,12 +126,17 @@ class EvoController:
         select_base_idx = np.random.choice(np.arange(len(self.base_agent)), size=num_agents)
         use_base_idx, copies = np.unique(select_base_idx, return_counts=True)
         use_base = []
-        self.reward_function.alpha = max(.13 * self.decay * self.full_count + .3, .001)
+        # set alpha value based on number of iterations
+        alpha = max(.13 * self.decay * self.full_count + .3, .00001)
+        self.reward_function.alpha = max(alpha, .3 * .9994**self.full_count)
+        # set epsilon exploration value
         local_eps = max(self.decay * self.full_count + self.epsilon, 0)
+        # set max base agents, will lose 1 every (decay / 3) epochs
+        self.num_base = max(math.ceil(2 * self.decay * self.full_count + self.start_base), 1)
         for i in use_base_idx:
             a = self.base_agent[i].clone(fuzzy=False)
             force_explore = random.random()
-            if random.random() < .12 and force_explore > local_eps:
+            if random.random() < .08 and force_explore > local_eps:
                 a.epsilon = force_explore * .8
             else:
                 a.epsilon = local_eps + (random.random() * .02)
@@ -158,14 +164,18 @@ class EvoController:
             return None, None
 
     def multiclone(self, agent1, agent2, equal=False):
+        try:
+            decode_node = agent1.decode_node
+        except AttributeError:
+            decode_node = 2
         new_agent = self.agent_class(num_nodes=agent1.core_model.num_nodes,
                                     channels=agent1.channels, spatial=agent1.spatial,
                                     kernel=agent1.core_model.edge.kernel_size, sensors=agent1.num_sensors,
                                     action_dim=agent1.action_dim,
-                                    device=agent1.device, input_channels=agent1.input_channels)
+                                    device=agent1.device, input_channels=agent1.input_channels, decode_node=decode_node)
         with torch.no_grad():
             if equal:
-                new_core_1 = agent1.core_model.clone(fuzzy=False)
+                new_core_1 = agent1.core_model.clone(fuzzy=True)
                 lincomb = .5
             else:
                 new_core_1 = agent1.core_model.clone(fuzzy=False)
@@ -272,7 +282,7 @@ class EvoController:
         if len(survivor_fitness) <= 0:
             print("No Survivor History!")
         else:
-            self.fitness_hist.append(np.mean(survivor_fitness))
+            self.fitness_hist.append(np.min(survivor_fitness))
             self.value_loss_hist.append(np.mean(survivor_v_loss))
             self.policy_loss_hist.append(np.mean(survivor_p_loss))
 
@@ -282,7 +292,7 @@ class EvoController:
         for i in range(self.num_base - num_survivors):
             parent1 = random.choice(self.base_agent)
             parent2 = random.choice(self.base_agent)
-            if random.random() < .5:
+            if random.random() < .2:
                 child = self.multiclone(parent1, parent2, equal=True)
             else:
                 child = self.multiclone(parent1, parent2)
@@ -396,7 +406,7 @@ class EvoController:
                 to_kill = set()
                 if len(workers) < num_workers and epoch <= self.epochs:
                     pid = "".join(random.choices("ABCDEFG1234567", k=5))
-                    if (epoch + 1) % disp_iter == 0:
+                    if (epoch ) % disp_iter == 0:
                         print("Episode Display Worker", pid)
                         if epoch != 0:
                             self.save_model(epoch, fbase)
