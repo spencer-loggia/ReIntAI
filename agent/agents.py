@@ -11,10 +11,12 @@ import matplotlib.pyplot as plt
 plt.ion()
 import numpy as np
 import torch
+import torch.nn as nn
 from torch import multiprocessing as mp
 
 import intrinsic.util
 from intrinsic.model import Intrinsic, FCIntrinsic
+
 from intrinsic.util import triu_to_square
 from pettingzoo.sisl import waterworld_v4
 
@@ -385,3 +387,71 @@ class FCWaterworldAgent(WaterworldAgent):
 
         plt.plot(loss_hist)
         plt.show()
+
+class RNNWaterworldAgent(WaterworldAgent):
+
+    def __init__(self, num_nodes = 36, device='cpu', input_mode="overwrite", *arg, **kwargs):
+
+        super().__init__(*arg, **kwargs)
+
+        if "decode_node" in kwargs:
+            self.decode_node = kwargs["decode_node"]
+        else:
+            self.decode_node = 2
+        if self.decode_node is None:
+            self.value_decoder = torch.empty((self.input_size, 1), device=self.device)
+            self.value_decoder = torch.nn.Parameter(torch.nn.init.xavier_normal_(self.value_decoder))
+        else:
+            self.value_decoder = torch.empty((self.spatial, 1), device=self.device)
+            self.value_decoder = torch.nn.Parameter(torch.nn.init.xavier_normal_(self.value_decoder))
+        self.value_decoder_bias = torch.nn.Parameter(torch.zeros((1,), device=self.device) + .001)
+
+        self.policy_decoder = torch.empty((self.spatial, 4), device=self.device)
+        self.policy_decoder = torch.nn.Parameter(torch.nn.init.xavier_normal_(self.policy_decoder))
+        self.policy_decoder_bias = torch.nn.Parameter(torch.zeros((4,), device=self.device) + .001)
+
+        input_encoder = torch.empty((self.input_size, self.spatial * self.input_channels), device=self.device)
+        input_encoder = torch.nn.init.xavier_normal_(input_encoder)
+
+        self.input_encoder = torch.nn.Parameter(input_encoder)
+        self.input_encoder_bias = torch.nn.Parameter(torch.zeros((1,), device=self.device) + .001)
+
+        self.num_nodes = num_nodes
+        self.device = device
+        self.input_mode = input_mode
+
+        self.rnn1 = nn.RNN(self.input_size, num_nodes, num_layers=1, batch_first=True)
+        self.rnn2 = nn.RNN(num_nodes, num_nodes, num_layers=1, batch_first=True)
+
+        for param in self.rnn1.parameters():
+            if len(param.shape) >= 2:  # Apply Xavier to weight matrices only
+                nn.init.xavier_uniform_(param.data)
+        for param in self.rnn2.parameters():
+            if len(param.shape) >= 2:  # Apply Xavier to weight matrices only
+                nn.init.xavier_uniform_(param.data)
+
+    def forward(self, X, r=None):
+
+        # Encode input using input_encoder
+        encoded_input = (X + self.input_encoder_bias) @ self.input_encoder
+        encoded_input = encoded_input.view(-1, 1, self.input_size)  # Reshape for RNN input
+
+        # Pass through first RNN layer
+        rnn_output1, _ = self.rnn1(encoded_input)
+
+        # Pass through second RNN layer
+        rnn_output2, _ = self.rnn2(rnn_output1)
+
+        # Decode the output to compute action parameters and value estimates
+        # Assuming the last output of the RNN contains the features for decoding
+        last_rnn_output = rnn_output2[:, -1, :]  # Taking the output of the last time step
+
+        action_params = (last_rnn_output @ self.policy_decoder) + self.policy_decoder_bias
+        value_est = (last_rnn_output @ self.value_decoder) + self.value_decoder_bias
+
+        # Split action_params into meaningful parts (mu and sigma)
+        mu = torch.tanh(action_params[..., :2])  # Applying tanh to scale outputs as needed
+        sigma = torch.exp(action_params[..., 2:])  # Ensure sigma is positive
+
+        return mu, sigma, value_est
+    def
