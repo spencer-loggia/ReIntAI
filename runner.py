@@ -2,21 +2,21 @@ from agent.agents import WaterworldAgent, DisjointWaterWorldAgent, FCWaterworldA
 from agent.evolve import EvoController
 import pickle
 import torch
-torch.set_default_dtype(torch.float64)
+# torch.set_default_dtype(torch.float64)
 import sys
 
 if __name__=="__main__":
     if sys.platform == "linux":
         import torch.multiprocessing as mp
         mp.set_start_method('spawn', force=True)
-    FC_AGENT = False
+    FC_AGENT = True
     DISJOINT_CRITIC = False
     EPOCHS = 20000
-    EPSILON_START = 1.0
-    EPSILON_DECAY = 4000
+    EPSILON_START = .25
+    EPSILON_DECAY = 2000
     ALGORITM = "a3c"
-    LOG_MAX_LR = -3
-    LOG_MIN_LR = -8
+    LOG_MAX_LR = -2.5
+    LOG_MIN_LR = -3.5
 
     if FC_AGENT:
         if DISJOINT_CRITIC:
@@ -45,5 +45,5 @@ if __name__=="__main__":
     evo = EvoController(seed_agent=agent, epochs=EPOCHS, num_base=5, num_workers=10,
                         min_agents=1, max_agents=3, min_gen=1, max_gen=1, log_min_lr=LOG_MIN_LR, log_max_lr=LOG_MAX_LR,
                         algo=ALGORITM, start_epsilon=EPSILON_START, inverse_eps_decay=EPSILON_DECAY, worker_device="cpu")
-    # evo.load_model("/Users/loggiasr/Projects/ReIntAI/models/evo_7/snap_8500_13.59_.pkl")
+    # evo.load_model("/Users/loggiasr/Projects/ReIntAI/models/evo_7/snap_8000_7.61_.pkl")
     evo.controller(mp=True, fbase=path)
