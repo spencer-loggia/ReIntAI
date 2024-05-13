@@ -326,9 +326,12 @@ class FCPlasticEdges():
         if "init_plasticity" in kwargs:
             init_plasticity = kwargs["init_plasticity"]
         else:
-            init_plasticity = .1
+            init_plasticity = .8
         self.plasticity = torch.nn.Parameter(
-            torch.ones((num_nodes, num_nodes, channels, channels), device=device) * init_plasticity)
+            torch.ones((num_nodes, num_nodes, channels, channels), device=device) * .8)
+        self.beta = torch.nn.Parameter(
+            torch.nn.init.xavier_normal_(torch.empty((2, num_nodes * spatial * channels),
+                                                     device=device) * init_plasticity))
         self.device = device
         self.debug = False
         self.kernel_size = None
@@ -343,13 +346,14 @@ class FCPlasticEdges():
         return expanded_weights
 
     def parameters(self):
-        params = [self.chan_map, self.plasticity, self.init_weight]
+        params = [self.chan_map, self.plasticity, self.beta, self.init_weight]
         return params
 
     def set_grad(self, grads):
         self.chan_map.grad = grads[0]
         self.plasticity.grad = grads[1]
-        self.init_weight.grad = grads[2]
+        self.beta.grad = grads[2]
+        self.init_weight.grad = grads[3]
 
     def __call__(self, x):
         return self.forward(x)
@@ -376,10 +380,8 @@ class FCPlasticEdges():
 
         # weights are zeroed for node -> node maps that are masked.
         combined_weight = self.weight * self.mask.view(self.num_nodes, self.num_nodes, 1, 1, 1, 1)
-        combined_weight = combined_weight.view(
-            (self.num_nodes, self.num_nodes, self.spatial, self.spatial, self.channels, self.channels))
         # Compose plastic weights and channel map
-        combined_weight = self.weight * self.chan_map.view(self.num_nodes, self.num_nodes, 1, 1, self.channels,
+        combined_weight = combined_weight * self.chan_map.view(self.num_nodes, self.num_nodes, 1, 1, self.channels,
                                                            self.channels)
 
         # prepare for matmul
@@ -421,10 +423,15 @@ class FCPlasticEdges():
         # unfold the current remapped activations
         # u, c, s
         activ_mem = self.activation_memory  # u, c, s
-        coactivation = torch.outer(target_meta_activations.flatten(), activ_mem.flatten())
+        coactivation = torch.stack((activ_mem.flatten(), target_meta_activations.flatten())) # 2, mm
+
+        weight = torch.permute(self.weight, (0, 3, 2, 5, 1, 4)).reshape((self.num_nodes * self.channels * self.spatial, -1))
+        coactivation = coactivation.T @ torch.softmax(self.beta * coactivation @ weight, dim=0)
+
         coactivation = coactivation.view(
             (self.num_nodes, self.channels, self.spatial, self.num_nodes, self.channels, self.spatial))
         coactivation = torch.permute(coactivation, (0, 3, 2, 5, 1, 4))  # u, v, s, s, c, c
+
 
         plasticity = self.plasticity.view(self.num_nodes, self.num_nodes, 1, 1, self.channels, self.channels).clone()
         if self.debug:

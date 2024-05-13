@@ -6,7 +6,7 @@ import torch
 
 from pettingzoo.sisl import waterworld_v4
 
-def episode(base_agents, copies, min_cycles=1000, max_cycles=1000, sensors=20, human=False, device="cpu", max_acc=.5,
+def episode(base_agents, copies, min_cycles=600, max_cycles=600, sensors=20, human=False, device="cpu", max_acc=.3,
             action_dist="weighted_dist"):
     """
     Function to run launch and take action in the waterworld environment
@@ -227,7 +227,7 @@ def local_evolve(q, pipe, generations, base_agents, copies, reward_function, tra
                 if stat_tracker[k]["fitness"] is not None:
                     stat_tracker[k]["fitness"] = np.mean(stat_tracker[k]["fitness"])
         q.put((stat_tracker, reward_function, proc))
-    except Exception as e:
+    except IndexError as e:
         # on any exception we return the pid so proc can be killed
         print("CAUGHT in local_evolve\n", e, "\n")
         q.put((None, None, proc))

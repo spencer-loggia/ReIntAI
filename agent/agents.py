@@ -203,8 +203,8 @@ class WaterworldAgent:
         # compute next action and value estimates
         action_params = (out_states[1, 0, :, :].flatten() + self.policy_decoder_bias) @ self.policy_decoder
         value_est = (out_states[3, 0, :, :].flatten() + self.value_decoder_bias) @ self.value_decoder
-        act_fxn = torch.nn.ReLU()
-        c1 = act_fxn(action_params[0:2]) + 1.0
+        act_fxn = torch.nn.Softplus()
+        c1 = act_fxn((action_params[0:2])) + 1.0
         c2 = act_fxn(action_params[2:]) + 1.0
         return c1, c2, value_est
 
@@ -316,8 +316,9 @@ class FCWaterworldAgent(WaterworldAgent):
         value_est = (critic_in.detach() @ self.value_decoder).flatten() + self.value_decoder_bias # out_states[2, 0, :, :].flatten() @ self.value_decoder
         if self.debug:
             value_est.register_hook(lambda grad: print("Grad Val Est", torch.abs(grad).sum()))
-        c1 = torch.relu(action_params[0:2]) + 1.0
-        c2 = torch.relu(action_params[2:]) + 1.0
+        act_fxn = torch.nn.Softplus()
+        c1 = act_fxn(action_params[0:2]) + 1.0
+        c2 = act_fxn(action_params[2:]) + 1.0
         return c1, c2, value_est
 
     def clone(self, fuzzy=True):

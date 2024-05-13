@@ -77,7 +77,7 @@ class EvoController:
         self.viz=viz
         self.algo = algo
         if algo == "a3c":
-            self.reward_function = ActorCritic(gamma=.96, alpha=.4)
+            self.reward_function = ActorCritic(gamma=.95, alpha=.4)
         elif algo == "reinforce":
             self.reward_function = Reinforce(gamma=.95, alpha=.4)
         else:
@@ -127,12 +127,12 @@ class EvoController:
         use_base_idx, copies = np.unique(select_base_idx, return_counts=True)
         use_base = []
         # set alpha value based on number of iterations
-        alpha = max(.13 * self.decay * self.full_count + .3, .00001)
+        alpha = max(.14 * self.decay * self.full_count + .3, .00001)
         self.reward_function.alpha = max(alpha, .3 * .9994**self.full_count)
         # set epsilon exploration value
         local_eps = max(self.decay * self.full_count + self.epsilon, 0)
         # set max base agents, will lose 1 every (decay / 3) epochs
-        self.num_base = max(math.ceil(2 * self.decay * self.full_count + self.start_base), 1)
+        self.num_base = max(math.ceil(2 * self.decay * self.full_count + self.start_base), 2)
         for i in use_base_idx:
             a = self.base_agent[i].clone(fuzzy=False)
             force_explore = random.random()
@@ -204,13 +204,13 @@ class EvoController:
     def survival(self):
         # select the most fit in the overall pool.
         # all_agents = [a.clone(fuzzy=False) for a in self.base_agent]
-        kill_prob = 1 / (6 * max(self.num_workers, 7))
+        kill_prob = self.num_base / (12 * max(self.num_workers, 7))
         if random.random() > kill_prob:
             return
         # num_survivors = min(self.num_base - 1, math.ceil(self.num_base * .75))
         num_survivors = max(1, math.floor(self.num_base * .75))
 
-        print("Agent pool")
+        print("Agent pool: kill prob was", kill_prob, "current size", len(self.base_agent))
 
         def _val(a):
             aid = a.id
@@ -269,10 +269,10 @@ class EvoController:
                 # send gradient back to gpu from cpu
                 self.last_grad[id][j] = .6 * self.last_grad[id][j] + .4 * g.to(self.device)
             self.base_agent[i].set_grad(self.last_grad[id])  # sets parameter gradient attributes
-            before_plast = self.base_agent[i].core_model.edge.chan_map.detach().clone()
+            before_plast = self.base_agent[i].core_model.edge.plasticity.detach().clone()
             self.optimizers[id].step()
             self.base_agent[i].version += 1
-            after_plast = self.base_agent[i].core_model.edge.chan_map.detach().clone()
+            after_plast = self.base_agent[i].core_model.edge.plasticity.detach().clone()
             change = torch.sum(torch.abs(after_plast - before_plast))
             print(id, self.base_agent[i].version, "change: ", change)
             survivor_fitness.append(stats[id]["fitness"])
@@ -323,8 +323,10 @@ class EvoController:
 
     def _add_optimizer_set(self, a):
         aid = a.id
+        log_min_lr = self.log_min_lr - (self.full_count / 2000)
+        log_max_lr = self.log_max_lr - (self.full_count / 2000)
         if aid not in self.optimizers:
-            lr = float(np.power(10, random.random() * (self.log_max_lr - self.log_min_lr) + self.log_min_lr))
+            lr = float(np.power(10, random.random() * (log_max_lr - log_min_lr) + log_min_lr))
             self.optimizers[a.id] = torch.optim.Adam(a.core_model.parameters() + [a.policy_decoder, a.input_encoder,
                                                                                   a.value_decoder, a.policy_decoder_bias,
                                                                                   a.value_decoder_bias, a.input_encoder_bias], lr=lr)
@@ -337,7 +339,7 @@ class EvoController:
         use_agent[0].epsilon = 0. # max(-(1/decay_by) * self.full_count + 1.0, .01)
         copies = [1]
         if mp:
-            p = Process(target=episode, args=(use_agent, copies, 2000, 2000, 20, True, self.worker_device))
+            p = Process(target=episode, args=(use_agent, copies, 500, 500, 20, True, self.worker_device))
             return p
         else:
             episode(use_agent, copies, 400, 400, 20, True, self.worker_device)
@@ -406,11 +408,12 @@ class EvoController:
                 to_kill = set()
                 if len(workers) < num_workers and epoch <= self.epochs:
                     pid = "".join(random.choices("ABCDEFG1234567", k=5))
-                    if (epoch ) % disp_iter == 0:
-                        print("Episode Display Worker", pid)
+                    if (epoch) % disp_iter == 0:
                         if epoch != 0:
                             self.save_model(epoch, fbase)
-                        p = self.spawn_visualization_worker(mp=False)
+                        if self.viz:
+                            print("Episode Display Worker", pid)
+                            p = self.spawn_visualization_worker(mp=False)
                     else:
                         print("Worker", pid, "handling epoch", epoch)
                         p, pipe = self.spawn_worker(integration_q, pid)

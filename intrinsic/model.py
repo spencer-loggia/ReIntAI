@@ -94,7 +94,7 @@ class Intrinsic:
             else:
                 raise IndexError
         # mix state update and current state values parameterized by resistance.
-        self.states = self.states * self.resistance + out_activ
+        self.states = self.states.detach() * self.resistance + out_activ
         if self.past_states is not None:
             self.past_states.append(self.states.clone())
         return self.states
