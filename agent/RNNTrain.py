@@ -16,109 +16,112 @@ import matplotlib.pyplot as plt
 from agents import WaterworldAgent
 from reward_functions import ActorCritic
 from exist import episode
+from evolve import EvoController
 
-class RNNtrain(WaterworldAgent):
 
-    def __init__(self, num_nodes = 36, device='cpu', input_mode="overwrite", *arg, **kwargs):
+class RNN_Agent(WaterworldAgent):
 
-        super().__init__(*arg, **kwargs)
+    def __init__(self, num_nodes, device, *arg, **kwargs):
+
+        super().__init__(num_nodes = num_nodes, *arg, **kwargs)
 
         if "decode_node" in kwargs:
             self.decode_node = kwargs["decode_node"]
         else:
             self.decode_node = 2
         if self.decode_node is None:
-            self.value_decoder = torch.empty((self.input_size, 1), device=self.device)
+            self.value_decoder = torch.empty((num_nodes, 1), device=self.device) # We need to double check this line about the input_size
             self.value_decoder = torch.nn.Parameter(torch.nn.init.xavier_normal_(self.value_decoder))
         else:
-            self.value_decoder = torch.empty((self.spatial, 1), device=self.device)
+            self.value_decoder = torch.empty((num_nodes, 1), device=self.device)
             self.value_decoder = torch.nn.Parameter(torch.nn.init.xavier_normal_(self.value_decoder))
         self.value_decoder_bias = torch.nn.Parameter(torch.zeros((1,), device=self.device) + .001)
 
-        self.policy_decoder = torch.empty((self.spatial, 4), device=self.device)
+        self.policy_decoder = torch.empty((num_nodes, 4), device=self.device)
         self.policy_decoder = torch.nn.Parameter(torch.nn.init.xavier_normal_(self.policy_decoder))
-        self.policy_decoder_bias = torch.nn.Parameter(torch.zeros((4,), device=self.device) + .001)
+        self.policy_decoder_bias = torch.nn.Parameter(torch.zeros((1,), device=self.device) + .001)
 
-        input_encoder = torch.empty((self.input_size, self.spatial * self.input_channels), device=self.device)
+        input_encoder = torch.empty((self.input_size, num_nodes), device=self.device)
         input_encoder = torch.nn.init.xavier_normal_(input_encoder)
 
         self.input_encoder = torch.nn.Parameter(input_encoder)
         self.input_encoder_bias = torch.nn.Parameter(torch.zeros((1,), device=self.device) + .001)
 
-        self.num_nodes = num_nodes
+        self.num_nodes_rnn = num_nodes
         self.device = device
-        self.input_mode = input_mode
 
-        self.rnn1 = nn.RNN(self.input_size, num_nodes, num_layers=1, batch_first=True)
-        self.rnn2 = nn.RNN(num_nodes, num_nodes, num_layers=1, batch_first=True)
+        self.rnn = nn.RNN(num_nodes, num_nodes, num_layers=2, batch_first=True)
+        # self.rnn2 = nn.RNN(num_nodes, num_nodes, num_layers=1, batch_first=True)
 
-        for param in self.rnn1.parameters():
+        for param in self.rnn.parameters():
             if len(param.shape) >= 2:  # Apply Xavier to weight matrices only
                 nn.init.xavier_uniform_(param.data)
-        for param in self.rnn2.parameters():
-            if len(param.shape) >= 2:  # Apply Xavier to weight matrices only
-                nn.init.xavier_uniform_(param.data)
+
+    def set_grad_rnn(self, grad):
+
+        self.input_encoder.grad = grad[0]
+        self.input_encoder_bias.grad = grad[1]
+        self.value_decoder.grad = grad[2]
+        self.value_decoder_bias.grad = grad[3]
+        self.policy_decoder.grad = grad[4]
+        self.policy_decoder_bias.grad = grad[5]
+        self.rnn.set_grad(grad[6:])
 
     def forward(self, X, r=None):
 
         # Encode input using input_encoder
         encoded_input = (X + self.input_encoder_bias) @ self.input_encoder
-        encoded_input = encoded_input.view(-1, 1, self.input_size)  # Reshape for RNN input
+        encoded_input = encoded_input.view((-1, 1, self.num_nodes_rnn))  # Reshape for RNN input
 
         # Pass through first RNN layer
-        rnn_output1, _ = self.rnn1(encoded_input)
+        rnn_output, _ = self.rnn(encoded_input)
 
-        # Pass through second RNN layer
-        rnn_output2, _ = self.rnn2(rnn_output1)
+        value_est = (rnn_output[0, 0, :] + self.value_decoder_bias) @ self.value_decoder
+        action_est = (rnn_output[0, 0, :] + self.policy_decoder_bias) @ self.policy_decoder
 
-        # Decode the output to compute action parameters and value estimates
-        # Assuming the last output of the RNN contains the features for decoding
-        last_rnn_output = rnn_output2[:, -1, :]  # Taking the output of the last time step
-
-        action_params = (last_rnn_output @ self.policy_decoder) + self.policy_decoder_bias
-        value_est = (last_rnn_output @ self.value_decoder) + self.value_decoder_bias
+        act_fxn = torch.exp(action_est)
 
         # Split action_params into meaningful parts (mu and sigma)
-        mu = torch.tanh(action_params[..., :2])  # Applying tanh to scale outputs as needed
-        sigma = torch.exp(action_params[..., 2:])  # Ensure sigma is positive
+        c1 = act_fxn[0:2]  # Applying tanh to scale outputs as needed
+        c2 = act_fxn[2:]  # Ensure sigma is positive
 
-        return mu, sigma, value_est
-    def instantiate(self):
-        action_likelihood = []
-        entropy = []
-        values =[]
-        rewards = []
-        new_agent = WaterworldAgent(num_nodes=self.core_model.num_nodes,
-                                    channels=self.channels, spatial=self.spatial, sensors=self.num_sensors,
-                                    action_dim=self.action_dim,
-                                    device=self.device, input_channels=self.input_channels, decode_node=self.decode_node)
-        # new_core = self.core_model.instantiate()
-        # new_agent.core_model = new_core
-        c1, c2, value_estimates = self.forward(X)
-        x_dist = torch.distributions.Beta(concentration0=c1[0], concentration1=c1[1])
-        y_dist = torch.distributions.Beta(concentration0=c2[0], concentration1=c2[1])
-        action_x = x_dist.sample()
-        action_y = y_dist.sample()
-        likelihood_x = x_dist.log_prob(action_x)
-        likelihood_y = y_dist.log_prob(action_y)
-        action_likelihood.append(likelihood_x+likelihood_y)
-        entropy.append (x_dist.entropy() + y_dist.entropy())
-        values.append (value_estimates)
-        actor_critic = ActorCritic(gamma=0.96, alpha=0.4)
-        valuesTensor = torch.FloatTensor(values)
-        val_loss, policy_loss = actor_critic.loss(torch.tensor(rewards, device=device),
-                                                     torch.concat(valuesTensor, dim=0),
-                                                     torch.stack(torch.tensor(action_likelihood).float ,dim=0),
-                                                     torch.stack(torch.tensor(entropy).float ,dim=0))
-        total_loss = val_loss + policy_loss
-        total_loss.backward()
+        return c1, c2, value_est
 
-        new_agent.policy_decoder = self.policy_decoder.clone()
-        new_agent.value_decoder = self.value_decoder.clone()
-        new_agent.input_encoder = self.input_encoder.clone()
-        new_agent.policy_decoder_bias = self.policy_decoder_bias.clone()
-        new_agent.value_decoder_bias = self.value_decoder_bias.clone()
-        new_agent.input_encoder_bias = self.input_encoder_bias.clone()
-        new_agent.epsilon = self.epsilon
-        new_agent.id = self.id
-        return new_agent
+# model = RNNtrain(num_nodes=36, device='cpu', input_mode='overwrite')
+
+# def train(agent, epochs, device, learning_rate):
+#
+#     # EPOCHS = 20000
+#     # EPSILON_START = 1.0
+#     # EPSILON_DECAY = 4000
+#     # ALGORITM = "a3c"
+#     # LOG_MAX_LR = -3
+#     # LOG_MIN_LR = -8
+#     # evo = EvoController(seed_agent=agent, epochs=EPOCHS, num_base=5, num_workers=10,
+#     #                     min_agents=1, max_agents=3, min_gen=1, max_gen=1, log_min_lr=LOG_MIN_LR,
+#     #                     log_max_lr=LOG_MAX_LR,
+#     #                     algo=ALGORITM, start_epsilon=EPSILON_START, inverse_eps_decay=EPSILON_DECAY,
+#     #                     worker_device="cpu")
+#     copies = [1]
+#     base_agents=[agent]
+#
+#     for epoch in range(epochs):
+#
+#         gen_info, base_scores = episode(base_agents, copies)
+#         agent_info = gen_info['pursuer_0']
+#         actor_critic = ActorCritic(gamma=0.96, alpha=0.4)
+#         val_loss, policy_loss = actor_critic.loss(torch.tensor(agent_info["inst_r"], device=device),
+#                                                      torch.concat(agent_info["value"], dim=0),
+#                                                      torch.stack(agent_info["action_likelihood"],dim=0),
+#                                                      torch.stack(agent_info["entropy"], dim=0))
+#         total_loss = val_loss + policy_loss
+#         total_loss.backward()
+#
+#         optimizer = optim.Adam(agent.parameters(), lr=learning_rate)
+#         optimizer.step()
+#
+#         print(epoch + 1, "/", epochs)
+#         print("Loss: ", total_loss.item())
+
+# model = RNN_Agent(num_nodes=36, num_layers=2, device="cpu", input_mode="override")
+# train(model, 20, "cpu", 0.001)
