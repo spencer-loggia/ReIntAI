@@ -14,6 +14,7 @@ from torch import multiprocessing as mp
 import matplotlib.pyplot as plt
 
 from agents import WaterworldAgent
+from intrinsic.model import Intrinsic
 from reward_functions import ActorCritic
 from exist import episode
 from evolve import EvoController
@@ -21,9 +22,9 @@ from evolve import EvoController
 
 class RNN_Agent(WaterworldAgent):
 
-    def __init__(self, num_nodes, device, *arg, **kwargs):
+    def __init__(self, num_nodes, channels, spatial, kernel, device, *arg, **kwargs):
 
-        super().__init__(num_nodes = num_nodes, *arg, **kwargs)
+        super().__init__(num_nodes = num_nodes, channels = channels, spatial = spatial, kernal = kernel, *arg, **kwargs)
 
         if "decode_node" in kwargs:
             self.decode_node = kwargs["decode_node"]
@@ -57,7 +58,9 @@ class RNN_Agent(WaterworldAgent):
             if len(param.shape) >= 2:  # Apply Xavier to weight matrices only
                 nn.init.xavier_uniform_(param.data)
 
-    def set_grad_rnn(self, grad):
+        core_model = Intrinsic(num_nodes)
+
+    def set_grad(self, grad):
 
         self.input_encoder.grad = grad[0]
         self.input_encoder_bias.grad = grad[1]
@@ -65,7 +68,8 @@ class RNN_Agent(WaterworldAgent):
         self.value_decoder_bias.grad = grad[3]
         self.policy_decoder.grad = grad[4]
         self.policy_decoder_bias.grad = grad[5]
-        self.rnn.set_grad(grad[6:])
+        self.core_model.set_grad(grad[6:])
+        # self.rnn.bias_hh_l0.data.grad = grad[6]
 
     def forward(self, X, r=None):
 
