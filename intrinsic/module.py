@@ -430,8 +430,8 @@ class FCPlasticEdges():
             weight = self.weight.detach()
         else:
             weight = self.weight
-        weight = torch.permute(weight, (0, 3, 2, 5, 1, 4)).reshape((self.num_nodes * self.channels * self.spatial, -1))
-        coactivation = coactivation.T @ torch.softmax(self.beta * coactivation @ weight, dim=0)
+        weight_l = torch.permute(weight, (0, 3, 2, 5, 1, 4)).reshape((self.num_nodes * self.channels * self.spatial, -1))
+        coactivation = coactivation.T @ torch.softmax(self.beta * coactivation @ weight_l, dim=0)
 
         coactivation = coactivation.view(
             (self.num_nodes, self.channels, self.spatial, self.num_nodes, self.channels, self.spatial))

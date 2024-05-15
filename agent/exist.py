@@ -227,7 +227,7 @@ def local_evolve(q, pipe, generations, base_agents, copies, reward_function, tra
                 if stat_tracker[k]["fitness"] is not None:
                     stat_tracker[k]["fitness"] = np.mean(stat_tracker[k]["fitness"])
         q.put((stat_tracker, reward_function, proc))
-    except Exception as e:
+    except IndexError as e:
         # on any exception we return the pid so proc can be killed
         print("CAUGHT in local_evolve\n", e, "\n")
         q.put((None, None, proc))
