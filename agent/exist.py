@@ -36,7 +36,7 @@ def episode(base_agents, copies, min_cycles=600, max_cycles=600, sensors=20, hum
                                          poison_reward=-3.5, thrust_penalty=-.001)
     else:
         env = waterworld_v4.parallel_env(n_pursuers=num_agents, n_coop=1, n_sensors=sensors,
-                                         max_cycles=cycles, speed_features=False, pursuer_max_accel=max_acc,
+                                         n_evaders=10, n_poisons=20, max_cycles=cycles, speed_features=False, pursuer_max_accel=max_acc,
                                          encounter_reward=0.1, food_reward=6.0, poison_reward=-3.5,
                                          thrust_penalty=-.001)
     env.reset()
@@ -169,7 +169,7 @@ def local_evolve(q, pipe, generations, base_agents, copies, reward_function, tra
                     stat_tracker[agent_info["base_name"]]["value_loss"][-1].append((val_loss / len(is_random)).detach().cpu().item())
                     stat_tracker[agent_info["base_name"]]["policy_loss"][-1].append((policy_loss / len(is_random)).detach().cpu().item())
                     stat_tracker[agent_info["base_name"]]["copies"] += weight
-                    a = .02
+                    a = .05
                     b = .1
                     if not train_act:
                         b = 0.0
@@ -197,14 +197,14 @@ def local_evolve(q, pipe, generations, base_agents, copies, reward_function, tra
             for i in range(num_base):
                 if not fail_tracker[i]:
                     a = base_agents[i]
-                    # reg = torch.sum(torch.abs(a.input_encoder))
-                    # reg = reg + torch.sum(torch.abs(a.core_model.edge.init_weight))
-                    # reg = reg + torch.sum(torch.abs(a.core_model.edge.chan_map))
-                    # if train_critic:
-                    #     reg = reg + torch.sum(torch.abs(a.value_decoder))
-                    # if train_act:
-                    #     reg = reg + torch.sum(torch.abs(a.policy_decoder))
-                    # total_loss[i] = total_loss[i] + .0001 * reg
+                    reg = torch.sum(torch.square(a.input_encoder))
+                    reg = reg + torch.sum(torch.square(a.core_model.edge.init_weight))
+                    reg = reg + torch.sum(torch.square(a.core_model.edge.chan_map))
+                    if train_critic:
+                        reg = reg + torch.sum(torch.square(a.value_decoder))
+                    if train_act:
+                        reg = reg + torch.sum(torch.square(a.policy_decoder))
+                    total_loss[i] = total_loss[i] + .0001 * reg
                     total_loss[i].backward()
                     for j, p in enumerate(a.parameters()):
                         if p.grad is None:
@@ -227,7 +227,7 @@ def local_evolve(q, pipe, generations, base_agents, copies, reward_function, tra
                 if stat_tracker[k]["fitness"] is not None:
                     stat_tracker[k]["fitness"] = np.mean(stat_tracker[k]["fitness"])
         q.put((stat_tracker, reward_function, proc))
-    except IndexError as e:
+    except Exception as e:
         # on any exception we return the pid so proc can be killed
         print("CAUGHT in local_evolve\n", e, "\n")
         q.put((None, None, proc))

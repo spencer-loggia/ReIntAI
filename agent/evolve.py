@@ -74,33 +74,35 @@ class EvoController:
         self.max_gen = max_gen
         self.min_agents = min_agents
         self.max_agents = max_agents
+        self._kill_count = 0
         self.viz=viz
         self.algo = algo
         if algo == "a3c":
-            self.reward_function = ActorCritic(gamma=.95, alpha=.4)
+            self.reward_function = ActorCritic(gamma=.95, alpha=.00001)
         elif algo == "reinforce":
-            self.reward_function = Reinforce(gamma=.95, alpha=.4)
+            self.reward_function = Reinforce(gamma=.95, alpha=.00001)
         else:
             raise ValueError
         self.full_count = 0
         self.epsilon = start_epsilon
         self.decay = -1 / inverse_eps_decay
-        if type(seed_agent) is DisjointWaterWorldAgent:
+        if type(seed_agent[0]) is DisjointWaterWorldAgent:
             self.disjoint_critic = True
         else:
             self.disjoint_critic = False
-        self.agent_class = type(seed_agent)
+        self.agent_class = type(seed_agent[0])
 
         self.num_workers = num_workers
-        self.sensors = seed_agent.num_sensors
-        self.base_agent = [seed_agent.clone(fuzzy=False)]
+        self.sensors = seed_agent[0].num_sensors
+        self.base_agent = [a.clone(fuzzy=False) for a in seed_agent]
         self.optimizers = {}
-        self.last_grad = {seed_agent.id: [0. for _ in seed_agent.parameters()]}
+        self.last_grad = {a.id: [0. for _ in a.parameters()] for a in self.base_agent}
         self.worker_device = worker_device
-        self.device = seed_agent.device
+        self.device = seed_agent[0].device
         self.num_integrations = 0
         self.evo_tree = networkx.DiGraph()
-        self.evo_tree.add_node(seed_agent.id, fitness=[], vloss=[], ploss=[], copies=[], entropy=[])
+        for a in self.base_agent:
+            self.evo_tree.add_node(a.id, fitness=[], vloss=[], ploss=[], copies=[], entropy=[])
         self.value_loss_hist = []
         self.policy_loss_hist = []
         self.fitness_hist = []
@@ -127,8 +129,8 @@ class EvoController:
         use_base_idx, copies = np.unique(select_base_idx, return_counts=True)
         use_base = []
         # set alpha value based on number of iterations
-        alpha = max(.14 * self.decay * self.full_count + .3, .00001)
-        self.reward_function.alpha = max(alpha, .3 * .9994**self.full_count)
+        alpha = max(.05 * self.decay * self.full_count + .1, .000001)
+        self.reward_function.alpha = max(alpha, .01 * .9994**self.full_count)
         # set epsilon exploration value
         local_eps = max(self.decay * self.full_count + self.epsilon, 0)
         # set max base agents, will lose 1 every (decay / 3) epochs
@@ -136,7 +138,7 @@ class EvoController:
         for i in use_base_idx:
             a = self.base_agent[i].clone(fuzzy=False)
             force_explore = random.random()
-            if random.random() < .08 and force_explore > local_eps:
+            if random.random() < 0.0 and force_explore > local_eps:
                 a.epsilon = force_explore * .8
             else:
                 a.epsilon = local_eps + (random.random() * .02)
@@ -204,9 +206,11 @@ class EvoController:
     def survival(self):
         # select the most fit in the overall pool.
         # all_agents = [a.clone(fuzzy=False) for a in self.base_agent]
-        kill_prob = self.num_base / (12 * max(self.num_workers, 7))
-        if random.random() > kill_prob:
+        kill_prob = self.num_base / (8 * max(self.num_workers, 7))
+        if random.random() > kill_prob or self._kill_count < 30:
+            self._kill_count += 1
             return
+        self._kill_count = 0
         # num_survivors = min(self.num_base - 1, math.ceil(self.num_base * .75))
         num_survivors = max(1, math.floor(self.num_base * .75))
 
@@ -244,10 +248,11 @@ class EvoController:
                 continue
             if stats[id]["failure"]:
                 print("FAILURE DETECTED: ", id)
-                alive.remove(a)
-                self.optimizers.pop(a.id)
-                self.last_grad.pop(a.id)
-                self.base_agent = list(alive)
+                if len(self.base_agent) > 1:
+                    alive.remove(a)
+                    self.optimizers.pop(a.id)
+                    self.last_grad.pop(a.id)
+                    self.base_agent = list(alive)
             self.evo_tree.nodes[id]["fitness"].append(stats[id]["fitness"])
             self.evo_tree.nodes[id]["vloss"].append(stats[id]["value_loss"])
             self.evo_tree.nodes[id]["ploss"].append(stats[id]["policy_loss"])
@@ -267,7 +272,7 @@ class EvoController:
             grads = stats[id]["gradient"]
             for j, g in enumerate(grads):
                 # send gradient back to gpu from cpu
-                self.last_grad[id][j] = .6 * self.last_grad[id][j] + .4 * g.to(self.device)
+                self.last_grad[id][j] = .4 * self.last_grad[id][j] + .6 * g.to(self.device)
             self.base_agent[i].set_grad(self.last_grad[id])  # sets parameter gradient attributes
             before_plast = self.base_agent[i].core_model.edge.plasticity.detach().clone()
             self.optimizers[id].step()
@@ -323,8 +328,8 @@ class EvoController:
 
     def _add_optimizer_set(self, a):
         aid = a.id
-        log_min_lr = self.log_min_lr - (self.full_count / 2000)
-        log_max_lr = self.log_max_lr - (self.full_count / 2000)
+        log_min_lr = max(self.log_min_lr - (self.full_count / 1500), -10)
+        log_max_lr = max(self.log_max_lr - (self.full_count / 1500), -8)
         if aid not in self.optimizers:
             lr = float(np.power(10, random.random() * (log_max_lr - log_min_lr) + log_min_lr))
             self.optimizers[a.id] = torch.optim.Adam(a.core_model.parameters() + [a.policy_decoder, a.input_encoder,
@@ -333,16 +338,15 @@ class EvoController:
             self.last_grad[aid] = [0. for _ in a.parameters()]
 
     def spawn_visualization_worker(self, mp=True):
-        # select current best base agent
-        use_agent = [max(self.base_agent, key=lambda x: x.fitness)]
-        decay_by = 4000
-        use_agent[0].epsilon = 0. # max(-(1/decay_by) * self.full_count + 1.0, .01)
+        # select current best base agent on last survival
+        use_agent = [self.base_agent[0]]
+        use_agent[0].epsilon = 0.  # max(-(1/decay_by) * self.full_count + 1.0, .01)
         copies = [1]
         if mp:
-            p = Process(target=episode, args=(use_agent, copies, 500, 500, 20, True, self.worker_device))
+            p = Process(target=episode, args=(use_agent, copies, 600, 600, 20, True, self.worker_device))
             return p
         else:
-            episode(use_agent, copies, 400, 400, 20, True, self.worker_device)
+            episode(use_agent, copies, 600, 600, 20, True, self.worker_device)
             return
 
     def save_model(self, iter, fbase: str):
@@ -373,7 +377,7 @@ class EvoController:
         self.policy_loss_hist = p["p_hist"]
         try:
             rf = p["r_fxn"]
-            rf.alpha = .0002
+            rf.alpha = .000001
             self.full_count = p["count"]
             # don't directly assign so we can change rfs
             self.reward_function.count = rf.count
@@ -408,7 +412,7 @@ class EvoController:
                 to_kill = set()
                 if len(workers) < num_workers and epoch <= self.epochs:
                     pid = "".join(random.choices("ABCDEFG1234567", k=5))
-                    if (epoch) % disp_iter == 0:
+                    if (epoch + 1) % disp_iter == 0:
                         if epoch != 0:
                             self.save_model(epoch, fbase)
                         if self.viz:
@@ -422,7 +426,7 @@ class EvoController:
                     epoch += 1
                     self.full_count += 1
             else:
-                if self.viz and (epoch + 1) % disp_iter == 0:
+                if self.viz and (epoch) % disp_iter == 0:
                     self.spawn_visualization_worker(mp=False)
                 else:
                     self.spawn_worker(integration_q, 0, mp=False)
@@ -453,7 +457,7 @@ class EvoController:
         self.axs[0].cla()
         self.axs[1].cla()
         self.axs[2].cla()
-        self.axs[0].plot(np.log2(uniform_filter1d(np.nan_to_num(val_hist, np.mean(val_hist)), size=5 * self.num_workers)))
+        self.axs[0].plot(np.log2(uniform_filter1d(np.nan_to_num(val_hist, np.mean(val_hist)), size=6 * self.num_workers)))
         p_disp = uniform_filter1d(np.array(self.policy_loss_hist), size=5 * self.num_workers)
         self.axs[1].plot(p_disp)
         self.axs[2].plot(uniform_filter1d(np.array(self.fitness_hist), size=5 * self.num_workers))

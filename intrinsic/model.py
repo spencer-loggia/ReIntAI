@@ -80,7 +80,7 @@ class Intrinsic:
         :param mask: boolean, optional, required with x. Which state indexes are updatable by x
         :return:
         """
-        h = self.states - 1  # + torch.normal(0, self.noise, self.states.shape)  # inject noise (and subtract 1?)
+        h = self.states  # + torch.normal(0, self.noise, self.states.shape)  # inject noise (and subtract 1?)
         self.edge.update(h)  # send current activation do local weight update
         out_activ = self.edge(h).clone()  # get output from all edges.
 
@@ -234,7 +234,7 @@ class FCIntrinsic:
             else:
                 raise IndexError
         # mix state update and current state values parameterized by resistance.
-        self.states = self.states * self.resistance + out_activ
+        self.states = self.states.detach() * self.resistance + out_activ
         if self.past_states is not None:
             self.past_states.append(self.states.clone())
         return self.states

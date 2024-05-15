@@ -254,7 +254,7 @@ class FCWaterworldAgent(WaterworldAgent):
             self.value_decoder = torch.empty((self.input_size, 1), device=self.device)
             self.value_decoder = torch.nn.Parameter(torch.nn.init.xavier_normal_(self.value_decoder))
         else:
-            self.value_decoder = torch.empty((self.spatial, 1), device=self.device)
+            self.value_decoder = torch.empty((self.spatial + self.input_size, 1), device=self.device)
             self.value_decoder = torch.nn.Parameter(torch.nn.init.xavier_normal_(self.value_decoder))
         self.value_decoder_bias = torch.nn.Parameter(torch.zeros((1,), device=self.device) + .001)
 
@@ -313,10 +313,10 @@ class FCWaterworldAgent(WaterworldAgent):
             critic_in = X.flatten().double()
         else:
             critic_in = out_states[self.decode_node, 0, :].flatten()
-        value_est = (critic_in.detach() @ self.value_decoder).flatten() + self.value_decoder_bias # out_states[2, 0, :, :].flatten() @ self.value_decoder
+        value_est = (torch.concat((critic_in.detach(), X), dim=0) @ self.value_decoder).flatten() + self.value_decoder_bias # out_states[2, 0, :, :].flatten() @ self.value_decoder
         if self.debug:
             value_est.register_hook(lambda grad: print("Grad Val Est", torch.abs(grad).sum()))
-        act_fxn = torch.nn.Softplus()
+        act_fxn = torch.square
         c1 = act_fxn(action_params[0:2]) + 1.0
         c2 = act_fxn(action_params[2:]) + 1.0
         return c1, c2, value_est
