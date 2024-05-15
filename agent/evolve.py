@@ -325,9 +325,7 @@ class EvoController:
         aid = a.id
         if aid not in self.optimizers:
             lr = float(np.power(10, random.random() * (self.log_max_lr - self.log_min_lr) + self.log_min_lr))
-            self.optimizers[a.id] = torch.optim.Adam(a.core_model.parameters() + [a.policy_decoder, a.input_encoder,
-                                                                                  a.value_decoder, a.policy_decoder_bias,
-                                                                                  a.value_decoder_bias, a.input_encoder_bias], lr=lr)
+            self.optimizers[a.id] = torch.optim.Adam(a.parameters(), lr=lr)
             self.last_grad[aid] = [0. for _ in a.parameters()]
 
     def spawn_visualization_worker(self, mp=True):
@@ -410,7 +408,7 @@ class EvoController:
                         print("Episode Display Worker", pid)
                         if epoch != 0:
                             self.save_model(epoch, fbase)
-                        p = self.spawn_visualization_worker(mp=False)
+                        p = self.spawn_visualization_worker()
                     else:
                         print("Worker", pid, "handling epoch", epoch)
                         p, pipe = self.spawn_worker(integration_q, pid)

@@ -14,17 +14,19 @@ from torch import multiprocessing as mp
 import matplotlib.pyplot as plt
 
 from agents import WaterworldAgent
+from pettingzoo.sisl import waterworld_v4
 from intrinsic.model import Intrinsic
 from reward_functions import ActorCritic
 from exist import episode
 from evolve import EvoController
+from intrinsic.module import PlasticEdges
 
 
 class RNN_Agent(WaterworldAgent):
 
-    def __init__(self, num_nodes, channels, spatial, kernel, device, *arg, **kwargs):
+    def __init__(self, num_nodes, device, *arg, **kwargs):
 
-        super().__init__(num_nodes = num_nodes, channels = channels, spatial = spatial, kernal = kernel, *arg, **kwargs)
+        super().__init__(num_nodes = num_nodes,  *arg, **kwargs)
 
         if "decode_node" in kwargs:
             self.decode_node = kwargs["decode_node"]
@@ -58,7 +60,14 @@ class RNN_Agent(WaterworldAgent):
             if len(param.shape) >= 2:  # Apply Xavier to weight matrices only
                 nn.init.xavier_uniform_(param.data)
 
-        core_model = Intrinsic(num_nodes)
+        # core_model = Intrinsic(num_nodes)
+
+    def parameters(self):
+        agent_heads = [self.input_encoder, self.input_encoder_bias, self.value_decoder,
+                       self.value_decoder_bias, self.policy_decoder, self.policy_decoder_bias, self.rnn.bias_hh_l0,
+                       self.rnn.bias_hh_l1, self.rnn.bias_ih_l0, self.rnn.bias_ih_l1, self.rnn.weight_hh_l0, self.rnn.weight_hh_l1,
+                       self.rnn.weight_ih_l0, self.rnn.weight_ih_l1]
+        return agent_heads
 
     def set_grad(self, grad):
 
@@ -68,8 +77,14 @@ class RNN_Agent(WaterworldAgent):
         self.value_decoder_bias.grad = grad[3]
         self.policy_decoder.grad = grad[4]
         self.policy_decoder_bias.grad = grad[5]
-        self.core_model.set_grad(grad[6:])
-        # self.rnn.bias_hh_l0.data.grad = grad[6]
+        self.rnn.bias_hh_l0.grad = grad[6]
+        self.rnn.bias_hh_l1.grad = grad[7]
+        self.rnn.bias_ih_l0.grad = grad[8]
+        self.rnn.bias_ih_l1.grad = grad[9]
+        self.rnn.weight_hh_l0.grad = grad[10]
+        self.rnn.weight_hh_l1.grad = grad[11]
+        self.rnn.weight_ih_l0.grad = grad[12]
+        self.rnn.weight_ih_l1.grad = grad[13]
 
     def forward(self, X, r=None):
 
@@ -90,6 +105,82 @@ class RNN_Agent(WaterworldAgent):
         c2 = act_fxn[2:]  # Ensure sigma is positive
 
         return c1, c2, value_est
+
+# model = RNN_Agent(num_nodes=36, num_layers=2, device="cpu")
+
+    def clone(self, fuzzy=True):
+
+        new_agent = RNN_Agent(num_nodes=36, num_layers=2, channels=1, spatial=5, kernel=None, device="cpu")
+
+        if not fuzzy:
+            new_agent.id = self.id
+            new_agent.version = self.version
+            new_agent.fitness = self.fitness
+            new_agent.v_loss = self.v_loss
+            new_agent.p_loss = self.p_loss
+        new_agent.epsilon = self.epsilon
+
+        with torch.no_grad():
+
+            new_agent.rnn.bias_hh_l0 = torch.nn.Parameter(self.rnn.bias_hh_l0.detach().clone())
+            new_agent.rnn.bias_hh_l1 = torch.nn.Parameter(self.rnn.bias_hh_l1.detach().clone())
+            new_agent.rnn.bias_ih_l0 = torch.nn.Parameter(self.rnn.bias_hh_l0.detach().clone())
+            new_agent.rnn.bias_ih_l1 = torch.nn.Parameter(self.rnn.bias_hh_l1.detach().clone())
+            new_agent.rnn.weight_hh_l0 = torch.nn.Parameter(self.rnn.weight_hh_l0.detach().clone())
+            new_agent.rnn.weight_hh_l1 = torch.nn.Parameter(self.rnn.weight_hh_l1.detach().clone())
+            new_agent.rnn.weight_ih_l0 = torch.nn.Parameter(self.rnn.weight_ih_l0.detach().clone())
+            new_agent.rnn.weight_ih_l1 = torch.nn.Parameter(self.rnn.weight_ih_l1.detach().clone())
+            new_agent.policy_decoder = torch.nn.Parameter(self.policy_decoder.detach().clone())
+            new_agent.value_decoder = torch.nn.Parameter(self.value_decoder.detach().clone())
+            new_agent.input_encoder = torch.nn.Parameter(self.input_encoder.detach().clone())
+            new_agent.policy_decoder_bias = torch.nn.Parameter(self.policy_decoder_bias.detach().clone())
+            new_agent.value_decoder_bias = torch.nn.Parameter(self.value_decoder_bias.detach().clone())
+            new_agent.input_encoder_bias = torch.nn.Parameter(self.input_encoder_bias.detach().clone())
+
+        return new_agent
+
+    def instantiate(self):
+        new_agent = RNN_Agent(num_nodes=36, num_layers=2, channels=1, spatial=5, kernel=None, device="cpu")
+
+        new_agent.rnn.bias_hh_l0 = torch.nn.Parameter(self.rnn.bias_hh_l0.clone())
+        new_agent.rnn.bias_hh_l1 = torch.nn.Parameter(self.rnn.bias_hh_l1.clone())
+        new_agent.rnn.bias_ih_l0 = torch.nn.Parameter(self.rnn.bias_hh_l0.clone())
+        new_agent.rnn.bias_ih_l1 = torch.nn.Parameter(self.rnn.bias_hh_l1.clone())
+        new_agent.rnn.weight_hh_l0 = torch.nn.Parameter(self.rnn.weight_hh_l0.clone())
+        new_agent.rnn.weight_hh_l1 = torch.nn.Parameter(self.rnn.weight_hh_l1.clone())
+        new_agent.rnn.weight_ih_l0 = torch.nn.Parameter(self.rnn.weight_ih_l0.clone())
+        new_agent.rnn.weight_ih_l1 = torch.nn.Parameter(self.rnn.weight_ih_l1.clone())
+        new_agent.policy_decoder = self.policy_decoder.clone()
+        new_agent.value_decoder = self.value_decoder.clone()
+        new_agent.input_encoder = self.input_encoder.clone()
+        new_agent.policy_decoder_bias = self.policy_decoder_bias.clone()
+        new_agent.value_decoder_bias = self.value_decoder_bias.clone()
+        new_agent.input_encoder_bias = self.input_encoder_bias.clone()
+        new_agent.epsilon = self.epsilon
+        new_agent.id = self.id
+        return new_agent
+    #
+    # def pretrain_agent_input(self, epochs, obs_data, use_channels=True):
+    #     batch_size = 250
+    #     channels = self.input_channels
+    #     decoders = torch.nn.Linear(in_features=self.spatial * self.input_channels, out_features=self.input_size)
+    #     optim = torch.optim.Adam([self.input_encoder] + list(decoders.parameters()), lr=.0001)
+    #
+    #     loss_hist = []
+    #
+    #     for i in range(epochs):
+    #         optim.zero_grad()
+    #         batch = torch.from_numpy(obs_data[np.random.choice(np.arange(len(obs_data)), size=batch_size, replace=False)]).float()
+    #         encoded = torch.sigmoid(batch @ self.input_encoder)
+    #         encoded = encoded.view((batch_size, channels * self.spatial))
+    #         decoded = decoders(encoded)
+    #         loss = torch.sqrt(torch.mean(torch.pow(batch - decoded, 2)))
+    #         reg = .001 * torch.sum(torch.abs(self.input_encoder))
+    #         loss_hist.append(loss.detach().cpu().item())
+    #         print("epoch", i, "loss", loss_hist[-1], "reg", reg.detach().cpu().item())
+    #         loss = loss + reg
+    #         loss.backward()
+    #         optim.step()
 
 # model = RNNtrain(num_nodes=36, device='cpu', input_mode='overwrite')
 
@@ -127,5 +218,4 @@ class RNN_Agent(WaterworldAgent):
 #         print(epoch + 1, "/", epochs)
 #         print("Loss: ", total_loss.item())
 
-# model = RNN_Agent(num_nodes=36, num_layers=2, device="cpu", input_mode="override")
 # train(model, 20, "cpu", 0.001)
