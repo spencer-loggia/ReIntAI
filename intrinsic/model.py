@@ -153,7 +153,7 @@ class FCIntrinsic:
     def __init__(self, num_nodes, node_shape: tuple = (1, 3, 64), inject_noise=False,
                  edge_module=FCPlasticEdges, device='cpu', track_activation_history=False,
                  mask=None, is_resistive=True, input_mode="overwrite",
-                 optimize_weights=True, *args, **kwargs):
+                 through_time=False, optimize_weights=True, *args, **kwargs):
         """
         :param num_nodes: Number of nodes in the graph.
         :param node_shape: Shape (channels and spatial of each node in the graph.
@@ -185,10 +185,12 @@ class FCIntrinsic:
                                 channels=node_shape[1],
                                 device=device, mask=mask, inject_noise=inject_noise, normalize_conv=False,
                                 init_plasticity=.2,
-                                optimize_weights=optimize_weights)
+                                optimize_weights=optimize_weights,
+                                through_time=through_time)
 
         # whether to add random gaussian noise at each forward step
         self.inject_noise = inject_noise
+        self.through_time = through_time 
         self.noise = .1  # std deviations of injected noise.
         self.sigmoid = torch.nn.Sigmoid()  # activation function for each edge must have range on closed interval [0, 1]
         # memory to track history of each state.
@@ -205,7 +207,8 @@ class FCIntrinsic:
                                 track_activation_history=self.past_states is not None, mask=self.edge.mask,
                                 is_resistive=self.resistive,
                                 input_mode=self.input_mode,
-                                optimize_weights=self.edge.optimize_weights)
+                                optimize_weights=self.edge.optimize_weights,
+                                through_time=self.through_time)
         new_model.states = self.states
         new_model.edge = self.edge.instantiate()
         new_model.resistance = self.resistance.clone()
@@ -234,7 +237,11 @@ class FCIntrinsic:
             else:
                 raise IndexError
         # mix state update and current state values parameterized by resistance.
-        self.states = self.states.detach() * self.resistance + out_activ
+        if self.through_time:
+            states = self.states 
+        else:
+            states = self.states.detach()
+        self.states = states * self.resistance + out_activ
         if self.past_states is not None:
             self.past_states.append(self.states.clone())
         return self.states
@@ -269,7 +276,8 @@ class FCIntrinsic:
         new_model = FCIntrinsic(self.num_nodes, (1, self.edge.channels, self.edge.spatial),
                               inject_noise=self.inject_noise, edge_module=FCPlasticEdges, device=device,
                               track_activation_history=self.past_states is not None, mask=self.edge.mask,
-                              is_resistive=self.resistive, input_mode=self.input_mode, optimize_weights=self.edge.optimize_weights)
+                              is_resistive=self.resistive, input_mode=self.input_mode, optimize_weights=self.edge.optimize_weights,
+                              through_time=self.through_time)
         new_model.states = self.states.detach().to(device)
         new_model.edge = self.edge.clone(fuzzy=fuzzy).to(device)
         new_model.resistance = torch.nn.Parameter(self.resistance.detach().clone().to(device))

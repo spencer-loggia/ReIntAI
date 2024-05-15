@@ -284,7 +284,7 @@ class PlasticEdges():
 
 class FCPlasticEdges():
     def __init__(self, num_nodes, spatial, channels, device='cpu', mask=None, optimize_weights=True, debug=False,
-                 *args, **kwargs):
+                 through_time=False, *args, **kwargs):
         """
         Designed to operate on a (n, c, s, s) intrinsic graph. Defines a convolutional edge with a Hebbian-like
         local update function between each node and each channel on the graph.
@@ -303,6 +303,7 @@ class FCPlasticEdges():
         self.num_nodes = num_nodes
         self.spatial = spatial
         self.channels = channels
+        self.through_time = through_time
 
         # mask has shape (nodes, nodes) and allows us to predefine a graph structure besides fully connected.
         if mask is None:
@@ -424,8 +425,12 @@ class FCPlasticEdges():
         # u, c, s
         activ_mem = self.activation_memory  # u, c, s
         coactivation = torch.stack((activ_mem.flatten(), target_meta_activations.flatten())) # 2, mm
-
-        weight = torch.permute(self.weight.detach(), (0, 3, 2, 5, 1, 4)).reshape((self.num_nodes * self.channels * self.spatial, -1))
+        
+        if not self.through_time:
+            weight = self.weight.detach()
+        else:
+            weight = self.weight
+        weight = torch.permute(weight, (0, 3, 2, 5, 1, 4)).reshape((self.num_nodes * self.channels * self.spatial, -1))
         coactivation = coactivation.T @ torch.softmax(self.beta * coactivation @ weight, dim=0)
 
         coactivation = coactivation.view(
@@ -436,14 +441,14 @@ class FCPlasticEdges():
         plasticity = self.plasticity.view(self.num_nodes, self.num_nodes, 1, 1, self.channels, self.channels).clone()
         if self.debug:
             plasticity.register_hook(lambda grad: print("plast", grad.reshape(grad.shape[0], -1).sum(dim=-1)))
-        self.weight = (1 - plasticity) * self.weight.detach() + plasticity * coactivation
+        self.weight = (1 - plasticity) * weight + plasticity * coactivation
         # self.weight = torch.log((1 - plasticity) * torch.exp(self.weight) + plasticity * coactivation)
         return
 
     def instantiate(self):
         instance = FCPlasticEdges(self.num_nodes, self.spatial, self.channels,
                                   device=self.device, mask=self.mask, optimize_weights=self.optimize_weights,
-                                  debug=self.debug)
+                                  through_time=self.through_time, debug=self.debug)
         instance.init_weight = self.init_weight.clone()
         instance.weight = instance._expand_base_weights(instance.init_weight)
         instance.chan_map = self.chan_map.clone()
@@ -474,7 +479,7 @@ class FCPlasticEdges():
     def clone(self, fuzzy=False):
         instance = FCPlasticEdges(self.num_nodes, self.spatial, self.channels,
                                 device=self.device, mask=self.mask, optimize_weights=self.optimize_weights,
-                                debug=self.debug)
+                                through_time=self.through_time, debug=self.debug)
         if fuzzy:
             s1 = float(self.init_weight.std()) * (.5 * random.random() + .1)
             s2 = float(self.chan_map.std()) * (.5 * random.random() + .1)
