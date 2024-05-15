@@ -354,7 +354,7 @@ class EvoController:
             os.mkdir(fbase)
         v = np.log2(_compute_loss_values(self.value_loss_hist))
         v = round(float(v), 2)
-        package = {"agents": self.base_agent,
+        package = {"agents": [a.clone(set_dev="cpu") for a in self.base_agent],
                    "optim": self.optimizers,
                    "tree": self.evo_tree,
                    "fit_hist": self.fitness_hist,
@@ -371,7 +371,7 @@ class EvoController:
         with open(fpath, "rb") as f:
             p = pickle.load(f)
         self.evo_tree = p["tree"]
-        self.base_agent = p["agents"]
+        self.base_agent = [a.clone(set_dev=self.worker_device) for a in p["agents"]]
         self.fitness_hist = p["fit_hist"]
         self.value_loss_hist = p["val_hist"]
         self.policy_loss_hist = p["p_hist"]
@@ -386,7 +386,7 @@ class EvoController:
         except KeyError:
             print("No reward fxn in saved dict.")
 
-    def controller(self, mp=True, disp_iter=500, fbase="/users/jkim116/data/jkim116/ReinAI/ReIntAI/models/testOscar"):
+    def controller(self, mp=True, disp_iter=500, fbase="/users/jkim116/epavlick/jkim116/ReIntAI/models/testOscar"):
         num_workers = self.num_workers
         workers = {}
         epoch = 0
@@ -412,6 +412,11 @@ class EvoController:
                 to_kill = set()
                 if len(workers) < num_workers and epoch <= self.epochs:
                     pid = "".join(random.choices("ABCDEFG1234567", k=5))
+<<<<<<< HEAD
+                    if (epoch) % disp_iter == 0:
+=======
+                    if (epoch ) % disp_iter == 0:
+>>>>>>> ef37fbb (save pickle cuda files to cpu)
                     if (epoch + 1) % disp_iter == 0:
                         if epoch != 0:
                             self.save_model(epoch, fbase)
