@@ -43,7 +43,17 @@ from supervised.l2l import l2l_loss
 # num_epochs = 10
 # learning_rate = 0.001
 # device = "cpu"
-
+def Predic_Score(output_logit, label):
+    normP = torch.softmax(output_logit, dim=0)
+    if float(normP[0] >= normP[1]):
+        pred_label = 0
+    elif float(normP[0] < normP[1]):
+        pred_label = 1
+    if pred_label == label:
+        pred_score = 0.5
+    else:
+        pred_score = -0.5
+    return pred_score
 
 class RNN_decoder:
     def __init__(self, train_labels, num_nodes, num_layers, device, learning_rate, *args, **kwargs):
@@ -57,24 +67,20 @@ class RNN_decoder:
         self.num_classes = len(train_labels)
         self.rnn = torch.nn.RNN(num_nodes, num_nodes, num_layers)
 
+        score_encoder = torch.nn.init.normal_(torch.empty(1, 81), 0, 0.1)
+        self.score_encoder = torch.nn.Parameter(score_encoder, requires_grad=True)
+
         for param in self.rnn.parameters():
             if len(param.shape) >= 2:  # Apply Xavier to weight matrices only
                 nn.init.xavier_uniform_(param.data)
+        self.fc = nn.Linear(num_nodes, self.num_classes, device = device)
 
         self.loss_fn = nn.CrossEntropyLoss()
-        self.optim = torch.optim.Adam(self.rnn.parameters(), lr=learning_rate)
-        self.fc = nn.Linear(num_nodes, self.num_classes, device = device)
+        self.optim = torch.optim.Adam(list(self.rnn.parameters()) + list(self.fc.parameters()) + [self.score_encoder], lr=learning_rate)
+
         self.history = []
 
-    def forward(self, X, y): # X is the img and y is the train_label
-
-        ### Down sampling the image..
-        pool = torch.nn.MaxPool2d(3)
-        img = X.float()
-        img = pool(img.reshape((1, 1, img.shape[-1], -1))).squeeze()
-        img = (img - img.mean()) / img.std()
-        img = img.view(1, 81)
-        ### Down sampling the image input
+    def forward(self, img, y): # X is the img and y is the train_label
 
         h0 = torch.zeros(self.num_nodes).to(self.device)
 
@@ -84,27 +90,46 @@ class RNN_decoder:
         logits = self.fc(hidden_output[1])
         return logits
 
-    def _fit(self, data, label_map, iter = 100):
+    def _fit(self, data, label_map, iter = 50):
         all_logits = []
         all_labels = []
+        output_logits = []
+        output_labels = []
         count = 0
-        for img, label in data:
+        for X, label in data:
+            ### Down sampling the image..
+            pool = torch.nn.MaxPool2d(3)
+            img = X.float()
+            img = pool(img.reshape((1, 1, img.shape[-1], -1))).squeeze()
+            img = (img - img.mean()) / img.std()
+            img = img.view(1, 81)
+            ### Down sampling the image input
             if label not in label_map:
                 continue
-            if count > iter:
-                break
-            label = label_map.index(label)
-            logits = self.forward(img, label)
-            all_logits.append(logits.clone())
-            all_labels.append(label)
             count += 1
-        return torch.stack(all_logits, dim=0), torch.tensor(all_labels, device = self.device).long()
+            if count % 5 == 0 or (count + 1) % 5 == 0:
+                img = img + self.score_encoder
+            if count >= iter:
+                break
+            logit = self.forward(img, label)
+            label = label_map.index(label)
+
+            all_logits.append(logit)
+            all_labels.append(label)
+
+            if (count+2) % 5 == 0:
+                predic_score = Predic_Score(logit,label)
+                self.score_encoder = predic_score * self.score_encoder
+                output_logits.append(all_logits[count-1].clone())
+                output_labels.append(all_labels[count-1])
+
+        return torch.stack(output_logits, dim=0), torch.tensor(output_labels, device = self.device).long()
 
 
-    def l2l_fit(self, data, num_epochs, batch_size, loss_mode, reset_epochs = 5):
-        self.num_epochs = num_epochs
-        self.batch_size = batch_size
-        self.loss_mode = loss_mode
+
+    def l2l_fit(self, data, num_batches, loss_mode):
+
+        self.num_batches = num_batches
         l_fxn = torch.nn.CrossEntropyLoss(reduce=False)
         data = DataLoader(data, batch_size=1, shuffle=True)
         loss = torch.tensor([0.], device = self.device)
@@ -113,22 +138,10 @@ class RNN_decoder:
         flipped_model = self.instantiate()
         flipped_model.train_labels = list(reversed(self.train_labels))
 
-        for epoch in range(self.num_epochs):
+        for batch in range(self.num_batches):
             self.optim.zero_grad()
-            if (epoch % reset_epochs) == 0:
-                std_model.fc.bias.detach()
-                std_model.fc.weight.detach()
-                for param in std_model.rnn.parameters():
-                    param.detach()
-                for param in flipped_model.rnn.parameters():
-                    param.detach()
-            else:
-                for param in std_model.rnn.parameters():
-                    param.detach()
-                for param in flipped_model.rnn.parameters():
-                    param.detach()
-            logits, labels = std_model._fit(data, self.train_labels, batch_size)
-            f_logits, f_labels = flipped_model._fit(data, flipped_model.train_labels, batch_size)
+            logits, labels = std_model._fit(data, self.train_labels)
+            f_logits, f_labels = flipped_model._fit(data, flipped_model.train_labels)
             if loss_mode == "ce":
                 l_loss = torch.mean(l_fxn(logits, labels))
                 fl_loss = torch.mean(l_fxn(f_logits, f_labels))
@@ -142,15 +155,13 @@ class RNN_decoder:
                 raise ValueError("loss_mode must be one of ce, lse, both")
 
             self.history.append((l_loss.detach().cpu().item() + l_loss.detach().cpu().item()) / 2)
-            print("Epoch", epoch, "loss is", self.history[-1])
+            print("Batch:", batch, "loss is", self.history[-1])
             loss = loss + l_loss + fl_loss
-            if (epoch + 1) % 2 == 0:
-                # init_plast = self.model.edge.chan_map.clone()
-                loss.backward()
-                self.optim.step()
-                # sched.step()
-                loss = torch.zeros_like(loss)
-            # print("change:", init_plast - self.model.edge.chan_map.clone())
+            loss.backward()
+            self.optim.step()
+            # sched.step()
+            loss = torch.zeros_like(loss)
+
 
     def forward_fit(self, data, iter, use_labels=None):
         for param in self.rnn.parameters():

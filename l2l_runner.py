@@ -7,7 +7,7 @@ from supervised.l2l import Decoder
 from sklearn.metrics import roc_curve, RocCurveDisplay
 import matplotlib
 from matplotlib import pyplot as plt
-matplotlib.use('Qt5Agg')
+# matplotlib.use('Qt5Agg')
 import datetime
 
 import numpy as np
@@ -23,9 +23,9 @@ if __name__=="__main__":
     load = None
 
     try:
-        dataset = MNIST(root="/Users/loggiasr/Projects/ReIntAI/tmp", transform=PILToTensor())
+        dataset = MNIST(root="home/yangdong/Documents/ReIntAI/tmp", transform=PILToTensor())
     except RuntimeError:
-        dataset = MNIST(root="/Users/loggiasr/Projects/ReIntAI/tmp", download=True, transform=PILToTensor())
+        dataset = MNIST(root="home/yangdong/Documents/ReIntAI/tmp", download=True, transform=PILToTensor())
 
     if load is not None:
         with open(load, "rb") as f:
