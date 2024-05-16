@@ -274,10 +274,10 @@ class EvoController:
                 # send gradient back to gpu from cpu
                 self.last_grad[id][j] = .4 * self.last_grad[id][j] + .6 * g.to(self.device)
             self.base_agent[i].set_grad(self.last_grad[id])  # sets parameter gradient attributes
-            before_plast = self.base_agent[i].core_model.edge.plasticity.detach().clone()
+            before_plast = self.base_agent[i].core_model.edge.beta.detach().clone()
             self.optimizers[id].step()
             self.base_agent[i].version += 1
-            after_plast = self.base_agent[i].core_model.edge.plasticity.detach().clone()
+            after_plast = self.base_agent[i].core_model.edge.beta.detach().clone()
             change = torch.sum(torch.abs(after_plast - before_plast))
             print(id, self.base_agent[i].version, "change: ", change)
             survivor_fitness.append(stats[id]["fitness"])

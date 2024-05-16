@@ -50,7 +50,7 @@ class PlasticEdges():
 
         # Channel Mapping
         chan_map = torch.empty((num_nodes, num_nodes, channels, channels), device=device)
-        self.chan_map = torch.nn.Parameter(torch.nn.init.xavier_normal_(chan_map * .0001))
+        self.chan_map = torch.nn.Parameter(torch.nn.init.xavier_normal_(chan_map * .01))
         self.chan_mod = torch.tensor([0.], device=device)
 
         if "init_plasticity" in kwargs:
@@ -313,7 +313,7 @@ class FCPlasticEdges():
         # initial weight parameter
         self.init_weight = torch.zeros((num_nodes, num_nodes, spatial, spatial, channels, channels),
                                        device=device)  # 8D Tensor.
-        self.init_weight = torch.nn.init.xavier_normal_(self.init_weight * .0001)
+        self.init_weight = torch.nn.init.xavier_normal_(self.init_weight * .1)
         if optimize_weights:
             self.init_weight = torch.nn.Parameter(self.init_weight)
 
@@ -322,7 +322,7 @@ class FCPlasticEdges():
 
         # Channel Mapping
         chan_map = torch.empty((num_nodes, num_nodes, channels, channels), device=device)
-        self.chan_map = torch.nn.Parameter(torch.nn.init.xavier_normal_(chan_map * .0001))
+        self.chan_map = torch.nn.Parameter(torch.nn.init.xavier_normal_(chan_map * .1))
 
         if "init_plasticity" in kwargs:
             init_plasticity = kwargs["init_plasticity"]
@@ -431,7 +431,7 @@ class FCPlasticEdges():
         else:
             weight = self.weight
         weight_l = torch.permute(weight, (0, 3, 2, 5, 1, 4)).reshape((self.num_nodes * self.channels * self.spatial, -1))
-        coactivation = coactivation.T @ torch.softmax(self.beta * coactivation @ weight_l, dim=0)
+        coactivation = torch.flip(coactivation, (0,)).T @ torch.softmax(self.beta * coactivation @ weight_l, dim=0)
 
         coactivation = coactivation.view(
             (self.num_nodes, self.channels, self.spatial, self.num_nodes, self.channels, self.spatial))

@@ -78,7 +78,7 @@ class Decoder:
 
     def __init__(self,  train_labels=(3, 7), device="cpu", lr=1e-5):
         self.lr = lr
-        self.model = Intrinsic(num_nodes=5, node_shape=(1, 3, 9, 9), kernel_size=4, input_mode="overwrite", device=device)
+        self.model = FCIntrinsic(num_nodes=5, node_shape=(1, 2, 81), kernel_size=4, input_mode="overwrite", device=device)
         # self.model.init_weight = torch.nn.Parameter(torch.tensor([.01], device=device))
         self.train_labels = train_labels
         self.device = device
@@ -87,11 +87,16 @@ class Decoder:
             raise ValueError("implemented for binary case only")
         else:
             # is binary
-            self.decoder = torch.nn.Linear(in_features=9*9, out_features=len(train_labels), device=device)
+            decoder = torch.empty((81, len(train_labels)), device=device) # torch.nn.Linear(in_features=9*9, out_features=len(train_labels), device=device)
+            bias = torch.empty(len(train_labels), device=device)
+            self.decoder = torch.nn.Parameter(torch.nn.init.xavier_normal_(decoder))
+            self.bias = torch.nn.Parameter(torch.nn.init.normal(bias) * .01)
         self.optim = torch.optim.Adam(params=[self.model.resistance,
                                               self.model.edge.init_weight,
                                               self.model.edge.plasticity,
-                                              self.model.edge.chan_map] + list(self.decoder.parameters()), lr=lr)
+                                              self.model.edge.chan_map,
+                                              self.decoder,
+                                              self.bias], lr=lr)
 
         self.history = []
 
@@ -104,12 +109,12 @@ class Decoder:
         mask = in_states.bool()
         for i in range(3):
             with torch.no_grad():
-                in_states[0, 0, :, :] = img.detach()
-                mask[0, 0, :, :] = True
+                in_states[0, 0, :] = img.detach().flatten()
+                mask[0, 0, :] = True
             self.model(in_states.detach(), mask.detach())
-        in_features = self.model.states[2, 0, :, :]
-        logits = self.decoder(in_features.view(1, 1, -1)).flatten()  # in_features.mean(dim=(1, 2)).flatten()  #
-        correct = 2 * (torch.argmax(logits, dim=0) == y) - 1.
+        in_features = self.model.states[2, 0, :].flatten()
+        logits = in_features @ self.decoder + self.bias # in_features.mean(dim=(1, 2)).flatten()  #
+        correct = .5 * (torch.argmax(logits, dim=0) == y) - .25
         for i in range(3):
             # in_states = torch.zeros_like(self.model.states)
             # mask = in_states.bool()
@@ -208,7 +213,8 @@ class Decoder:
 
     def to(self, device):
         self.device = device
-        self.decoder = self.decoder.to(device)
+        self.decoder = torch.nn.Parameter(self.decoder.to(device))
+        self.bias = torch.nn.Parameter(self.bias.to(device))
         self.model = self.model.to(device)
         return self
 
@@ -216,8 +222,5 @@ class Decoder:
         new_model = Decoder(train_labels=self.train_labels, device=self.device, lr=self.lr)
         new_model.model = self.model.instantiate()
         new_model.decoder = self.decoder.clone()
+        new_model.bias = self.bias.clone()
         return new_model
-
-
-
-
