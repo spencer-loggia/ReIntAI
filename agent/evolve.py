@@ -386,7 +386,7 @@ class EvoController:
         except KeyError:
             print("No reward fxn in saved dict.")
 
-    def controller(self, mp=True, disp_iter=500, fbase="/users/jkim116/data/jkim116/ReinAI/ReIntAI/models/testOscar"):
+    def controller(self, mp=True, disp_iter=500, fbase="/users/jkim116/epavlick/jkim116/ReIntAI/models/testOscar"):
         num_workers = self.num_workers
         workers = {}
         epoch = 0
@@ -412,7 +412,7 @@ class EvoController:
                 to_kill = set()
                 if len(workers) < num_workers and epoch <= self.epochs:
                     pid = "".join(random.choices("ABCDEFG1234567", k=5))
-                    if (epoch + 1) % disp_iter == 0:
+                    if (epoch ) % disp_iter == 0:
                         if epoch != 0:
                             self.save_model(epoch, fbase)
                         if self.viz:
