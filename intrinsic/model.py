@@ -226,7 +226,7 @@ class FCIntrinsic:
         :param mask: boolean, optional, required with x. Which state indexes are updatable by x
         :return:
         """
-        h = self.states + torch.normal(0, self.noise, self.states.shape)  # inject noise (and subtract 1?)
+        h = self.states + torch.normal(0, self.noise, self.states.shape, device=self.device)  # inject noise (and subtract 1?)
         self.edge.update(h)  # do local weight update
         out_activ = self.edge(h).clone()  # get output from all edges.
 
