@@ -503,4 +503,9 @@ class FCPlasticEdges():
             self.plasticity.detach().clone() + torch.normal(size=self.chan_map.shape,
                                                             mean=m3,
                                                             std=s3, device=self.device))
+
+        instance.beta = torch.nn.Parameter(
+            self.beta.detach().clone() + torch.normal(size=self.beta.shape,
+                                                            mean=m3,
+                                                            std=s3, device=self.device))
         return instance
