@@ -267,7 +267,8 @@ class FCWaterworldAgent(WaterworldAgent):
         self.input_encoder = torch.nn.Parameter(input_encoder)
         self.input_encoder_bias = torch.nn.Parameter(torch.zeros((1,), device=self.device) + .001)
 
-        self.core_model = FCIntrinsic(num_nodes=4, node_shape=(1, self.channels, self.spatial), device=self.device)
+        self.core_model = FCIntrinsic(num_nodes=4, node_shape=(1, self.channels, self.spatial), inject_noise=True,
+                                      device=self.device)
         self.kernel_size = None
 
     def parameters(self):
