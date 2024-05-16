@@ -28,7 +28,10 @@ if __name__=="__main__":
             #     in_enc = pickle.load(f)
             # agent.input_encoder = in_enc
         else:
-            path = "models/fc_evo_32_bias_no_back"
+            if BP_THROUGH_TIME:
+                path = "models/fc_evo_32_through_time"
+            else:
+                path = "models/fc_evo_32_no_through_time"
             agent = [FCWaterworldAgent(num_nodes=4, spatial=32, channels=3, input_channels=2, through_time=BP_THROUGH_TIME, device="cuda") for _ in range(NUM_BASE)]
     else:
         if DISJOINT_CRITIC:
