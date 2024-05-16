@@ -33,7 +33,7 @@ class RNN_Agent(WaterworldAgent):
         else:
             self.decode_node = 2
         if self.decode_node is None:
-            self.value_decoder = torch.empty((num_nodes, 1), device=self.device) # We need to double check this line about the input_size
+            self.value_decoder = torch.empty((num_nodes, 1), device=self.device)
             self.value_decoder = torch.nn.Parameter(torch.nn.init.xavier_normal_(self.value_decoder))
         else:
             self.value_decoder = torch.empty((num_nodes, 1), device=self.device)
