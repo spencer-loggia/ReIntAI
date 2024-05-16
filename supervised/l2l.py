@@ -111,7 +111,7 @@ class Decoder:
         img = (img - img.mean()) / img.std()
         in_states = torch.zeros_like(self.model.states)
         mask = in_states.bool()
-        for i in range(2):
+        for i in range(3):
             with torch.no_grad():
                 in_states[0, 0, :] = img.detach().flatten()
                 mask[0, 0, :] = True
@@ -119,7 +119,7 @@ class Decoder:
         in_features = self.model.states[2, 0, :].flatten()
         logits = in_features @ self.decoder + self.bias # in_features.mean(dim=(1, 2)).flatten()  #
         correct = .5 * (torch.argmax(logits, dim=0) == y) - .25
-        for i in range(1):
+        for i in range(2):
             # in_states = torch.zeros_like(self.model.states)
             # mask = in_states.bool()
             in_states[1, 0, 5] = correct
