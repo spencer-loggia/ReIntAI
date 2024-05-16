@@ -18,12 +18,14 @@ import pickle
 if __name__ == "__main__":
     FIT = True
     OUT = "./models/l2l/"
-    ITER = 5000
+    ITER = 8000
     # SWAP_LABELS = True
-    DEV = "cpu"
-    EVAL_ITER = 20
-    REST_INT = 10
-    load = None # "/home/bizon/Projects/sl/ReIntAI/models/l2l/mnist_decoder_2024-05-07_15:50.pkl"
+    DEV = "cuda"
+    EVAL_ITER = 200
+    REST_INT = 5
+    SIZE = "large"
+    base = None # "./models/mnist_models/fc_stable_base.pkl"  # "/home/bizon/Projects/sl/ReIntAI/models/l2l/mnist_decoder_2024-05-07_15:50.pkl"
+    load = None # "/Users/loggiasr/Projects/ReIntAI/models/l2l/mnist_decoder_2024-05-16_00:51.pkl"
 
     try:
         dataset = MNIST(root="/tmp", transform=PILToTensor())
@@ -34,17 +36,22 @@ if __name__ == "__main__":
         with open(load, "rb") as f:
             decoder = pickle.load(f).to(DEV)
     else:
-        decoder = Decoder(train_labels=(3, 7), device=DEV, lr=1e-4)
+        decoder = Decoder(train_labels=(3, 7), device=DEV, lr=1e-5, size=SIZE)
+        if base is not None:
+            with open(base, "rb") as f:
+                m = pickle.load(f).to(DEV)
+            decoder.model = m
 
     decoder.optim = torch.optim.Adam(params=[decoder.model.resistance,
                                              decoder.model.edge.init_weight,
                                              decoder.model.edge.plasticity,
+                                             decoder.model.edge.beta,
                                              decoder.model.edge.chan_map,
                                              decoder.decoder,
-                                             decoder.bias], lr=1e-5)
+                                             decoder.bias], lr=1e-3)
     if FIT:
         # train on set of examples:
-        decoder.l2l_fit(dataset, ITER, batch_size=20, loss_mode="ce") # , switch_order=SWAP_LABELS
+        decoder.l2l_fit(dataset, ITER, batch_size=100, loss_mode="ce", reset_epochs=REST_INT) # , switch_order=SWAP_LABELS
         # decoder.l2l_fit(dataset, ITER, batch_size=20, loss_mode="both")
         # decoder.l2l_fit(dataset, ITER, batch_size=100, reset_epochs=REST_INT, loss_mode="l2l")
 
@@ -52,7 +59,7 @@ if __name__ == "__main__":
         with open(out_path, "wb") as f:
             pickle.dump(decoder.to("cpu"), f)
 
-    decoder.to("cuda")
+    decoder.to(DEV)
     train_fig, train_ax = plt.subplots(1)
     train_fig.suptitle("Train Set ROC")
     test_fig, test_ax = plt.subplots(1)

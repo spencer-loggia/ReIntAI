@@ -76,9 +76,13 @@ def q_loss(val_est, targets, lfxn, gamma=.9):
 
 class Decoder:
 
-    def __init__(self,  train_labels=(3, 7), device="cpu", lr=1e-5):
+    def __init__(self,  train_labels=(3, 7), device="cpu", lr=1e-5, size="small"):
         self.lr = lr
-        self.model = FCIntrinsic(num_nodes=3, node_shape=(1, 2, 81), kernel_size=4, input_mode="overwrite", device=device, through_time=True, inject_noise=False)
+        self.size = size
+        if size == "small":
+            self.model = FCIntrinsic(num_nodes=3, node_shape=(1, 2, 81), kernel_size=4, input_mode="overwrite", device=device, through_time=True, inject_noise=False)
+        elif size == "large":
+            self.model = FCIntrinsic(num_nodes=5, node_shape=(1, 4, 81), kernel_size=4, input_mode="overwrite", device=device, through_time=True, inject_noise=False)
         # self.model.init_weight = torch.nn.Parameter(torch.tensor([.01], device=device))
         self.train_labels = train_labels
         self.device = device
@@ -143,7 +147,7 @@ class Decoder:
         l_fxn = torch.nn.CrossEntropyLoss(reduce=False)
         data = DataLoader(data, shuffle=True, batch_size=1)
         loss = torch.tensor([0.], device=self.device)
-        sched = torch.optim.lr_scheduler.StepLR(optimizer=self.optim, gamma=.1, step_size=1000)
+        sched = torch.optim.lr_scheduler.StepLR(optimizer=self.optim, gamma=.1, step_size=1200)
         for epoch in range(epochs):
             self.optim.zero_grad()
             std_model = self.instantiate()
@@ -218,7 +222,7 @@ class Decoder:
         return self
 
     def instantiate(self):
-        new_model = Decoder(train_labels=self.train_labels, device=self.device, lr=self.lr)
+        new_model = Decoder(train_labels=self.train_labels, device=self.device, lr=self.lr, size=self.size)
         new_model.model = self.model.instantiate()
         new_model.decoder = self.decoder.clone()
         new_model.bias = self.bias.clone()
