@@ -80,7 +80,7 @@ class Intrinsic:
         :param mask: boolean, optional, required with x. Which state indexes are updatable by x
         :return:
         """
-        h = self.states + torch.normal(0, self.noise, self.states.shape)  # inject noise (and subtract 1?)
+        h = self.states -1 + torch.normal(0, self.noise, self.states.shape)  # inject noise (and subtract 1?)
         self.edge.update(h)  # send current activation do local weight update
         out_activ = self.edge(h).clone()  # get output from all edges.
 
@@ -192,7 +192,7 @@ class FCIntrinsic:
         self.inject_noise = inject_noise
         self.through_time = through_time
         if inject_noise:
-            self.noise = 0.00  # std deviations of injected noise.
+            self.noise = 0.01  # std deviations of injected noise.
         else:
             self.noise = 0.0
         self.sigmoid = torch.nn.Sigmoid()  # activation function for each edge must have range on closed interval [0, 1]
@@ -226,7 +226,7 @@ class FCIntrinsic:
         :param mask: boolean, optional, required with x. Which state indexes are updatable by x
         :return:
         """
-        h = self.states - 1  # + torch.normal(0, self.noise, self.states.shape)  # inject noise (and subtract 1?)
+        h = self.states + torch.normal(0, self.noise, self.states.shape)  # inject noise (and subtract 1?)
         self.edge.update(h)  # do local weight update
         out_activ = self.edge(h).clone()  # get output from all edges.
 

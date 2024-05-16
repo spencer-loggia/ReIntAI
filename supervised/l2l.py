@@ -78,7 +78,7 @@ class Decoder:
 
     def __init__(self,  train_labels=(3, 7), device="cpu", lr=1e-5):
         self.lr = lr
-        self.model = FCIntrinsic(num_nodes=5, node_shape=(1, 2, 81), kernel_size=4, input_mode="overwrite", device=device)
+        self.model = FCIntrinsic(num_nodes=3, node_shape=(1, 2, 81), kernel_size=4, input_mode="overwrite", device=device, through_time=True, inject_noise=False)
         # self.model.init_weight = torch.nn.Parameter(torch.tensor([.01], device=device))
         self.train_labels = train_labels
         self.device = device
@@ -107,7 +107,7 @@ class Decoder:
         img = (img - img.mean()) / img.std()
         in_states = torch.zeros_like(self.model.states)
         mask = in_states.bool()
-        for i in range(3):
+        for i in range(2):
             with torch.no_grad():
                 in_states[0, 0, :] = img.detach().flatten()
                 mask[0, 0, :] = True
@@ -115,11 +115,11 @@ class Decoder:
         in_features = self.model.states[2, 0, :].flatten()
         logits = in_features @ self.decoder + self.bias # in_features.mean(dim=(1, 2)).flatten()  #
         correct = .5 * (torch.argmax(logits, dim=0) == y) - .25
-        for i in range(3):
+        for i in range(1):
             # in_states = torch.zeros_like(self.model.states)
             # mask = in_states.bool()
-            in_states[1, 0, :] = correct
-            mask[1, 0, :] = True
+            in_states[1, 0, 5] = correct
+            mask[1, 0, 5] = True
             self.model(in_states, mask.detach())
         return logits
 
@@ -143,13 +143,12 @@ class Decoder:
         l_fxn = torch.nn.CrossEntropyLoss(reduce=False)
         data = DataLoader(data, shuffle=True, batch_size=1)
         loss = torch.tensor([0.], device=self.device)
-
-        std_model = self.instantiate()
-        flipped_model = self.instantiate()
-        flipped_model.train_labels = list(reversed(self.train_labels))
-
+        sched = torch.optim.lr_scheduler.StepLR(optimizer=self.optim, gamma=.1, step_size=1000)
         for epoch in range(epochs):
             self.optim.zero_grad()
+            std_model = self.instantiate()
+            flipped_model = self.instantiate()
+            flipped_model.train_labels = list(reversed(self.train_labels))
             if (epoch % reset_epochs) == 0:
                 std_model.model.detach(reset_intrinsic=True)
                 flipped_model.model.detach(reset_intrinsic=True)
@@ -171,16 +170,16 @@ class Decoder:
             else:
                 raise ValueError
             reg = torch.sum(torch.pow(self.model.edge.chan_map, 2)) + torch.sum(torch.abs(self.model.edge.plasticity))
+            reg.retain_grad()
             self.history.append((l_loss.detach().cpu().item() + l_loss.detach().cpu().item()) / 2)
             print("Epoch", epoch, "loss is", self.history[-1])
-            loss = loss + l_loss + fl_loss + .001 * reg
+            loss = l_loss + fl_loss + .001 * reg
             print('REG', .001 * reg)
-            if (epoch + 1) % 2 == 0:
-                # init_plast = self.model.edge.chan_map.clone()
-                loss.backward()
-                self.optim.step()
-                # sched.step()
-                loss = torch.zeros_like(loss)
+            # init_plast = self.model.edge.chan_map.clone()
+            loss.backward()
+            self.optim.step()
+            sched.step()
+            loss = torch.zeros_like(loss)
             # print("change:", init_plast - self.model.edge.chan_map.clone())
 
     def forward_fit(self, data, iter, use_labels=None):
