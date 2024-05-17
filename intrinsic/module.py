@@ -330,9 +330,7 @@ class FCPlasticEdges():
             init_plasticity = .8
         self.plasticity = torch.nn.Parameter(
             torch.ones((num_nodes, num_nodes, channels, channels), device=device) * .8)
-        self.beta = torch.nn.Parameter(
-            torch.nn.init.xavier_normal_(torch.empty((2, num_nodes * spatial * channels),
-                                                     device=device) * init_plasticity))
+        self.beta = torch.nn.Parameter(torch.ones((self.num_nodes * self.channels * self.spatial), device=device) * .1)
         self.device = device
         self.debug = False
         self.kernel_size = None
@@ -473,6 +471,7 @@ class FCPlasticEdges():
         self.weight = self.weight.to(device)
         self.chan_map = torch.nn.Parameter(self.chan_map.to(device))
         self.plasticity = torch.nn.Parameter(self.plasticity.to(device))
+        self.beta = torch.nn.Parameter(self.beta.to(device))
         self.mask = self.mask.to(device)
         self.device = device
         return self
