@@ -73,10 +73,10 @@ class PlasticEdges():
                                            self.channels, self.kernel_size,
                                            self.kernel_size)) * self.init_weight.clone()
         elif self.init_weight.shape[4] == 1:
-            expanded_weights = torch.tanh(
+            expanded_weights = torch.sigmoid(
                 torch.tile(in_weight.clone(), (1, 1, self.spatial1, self.spatial2, self.channels, self.channels, 1, 1)))
         else:
-            expanded_weights = torch.tanh(
+            expanded_weights = torch.sigmoid(
                 torch.tile(in_weight.clone(), (1, 1, self.spatial1, self.spatial2, 1, 1, 1, 1)))
         return expanded_weights
 
@@ -103,7 +103,7 @@ class PlasticEdges():
         if self.weight is None:
             self.weight = self._expand_base_weights(self.init_weight)
         x = x.to(self.device)  # nodes, channels, spatial1, spatial2
-        x = torch.tanh(x)  # compute tanh activation on range [0, 1]
+        x = torch.sigmoid(x)  # compute sigmoid activation on range [0, 1]
         if len(x.shape) != 4:
             raise ValueError("Input Tensor Must Be 4D, not shape", x.shape)
         if x.shape[0] != self.num_nodes:
@@ -125,7 +125,7 @@ class PlasticEdges():
         # add random noise to chan map to prevent it from becoming nonsingular
         chan_mod = torch.empty_like(self.chan_map)
         self.chan_mod = (torch.nn.init.xavier_normal_(chan_mod) * .001 -
-                         torch.eye(self.channels,self.channels,
+                         torch.eye(self.channels, self.channels,
                                    device=self.device).view((1, 1, self.channels, self.channels)) * .001)
         # self.chan_map = self.chan_map + chan_mod
 
@@ -185,11 +185,11 @@ class PlasticEdges():
 
         # This is a fast and  numerically stable equivalent to (chan_map ^ -1) (target_activations)
         # inv, info = torch.linalg.solve_ex(chan_map, target_activations)
-        # target_meta_activations = torch.tanh(inv)
+        # target_meta_activations = torch.sigmoid(inv)
         # target_meta_activations = target_meta_activations.transpose(0, 1).reshape(self.num_nodes, self.channels,
         #                                                                           self.spatial1,
         #                                                                           self.spatial2)  # u, c, s, s
-        target_meta_activations = torch.tanh(target_activation)
+        target_meta_activations = torch.sigmoid(target_activation)
 
         # unfold the current remapped activations
         ufld_target = self.unfolder(target_meta_activations).transpose(1,
@@ -216,10 +216,10 @@ class PlasticEdges():
         #                                                                                 self.kernel_size,
         #                                                                                 self.kernel_size)))
         self.weight = (1 - plasticity) * self.weight + plasticity * coactivation.view((self.num_nodes, self.num_nodes,
-                                                                                        self.spatial1, self.spatial2,
-                                                                                        self.channels, self.channels,
-                                                                                        self.kernel_size,
-                                                                                        self.kernel_size))
+                                                                                       self.spatial1, self.spatial2,
+                                                                                       self.channels, self.channels,
+                                                                                       self.kernel_size,
+                                                                                       self.kernel_size))
         return
 
     def instantiate(self):
@@ -330,7 +330,9 @@ class FCPlasticEdges():
             init_plasticity = .8
         self.plasticity = torch.nn.Parameter(
             torch.ones((num_nodes, num_nodes, channels, channels), device=device) * .8)
-        self.beta = torch.nn.Parameter(torch.ones((1,), device=device) * .02)
+        self.beta = torch.nn.Parameter(
+            torch.nn.init.xavier_normal_(torch.empty((2, num_nodes * spatial * channels),
+                                                     device=device) * init_plasticity))
         self.device = device
         self.debug = False
         self.kernel_size = None
@@ -368,7 +370,7 @@ class FCPlasticEdges():
         if self.weight is None:
             self.weight = self._expand_base_weights(self.init_weight)
         x = x.to(self.device)  # nodes, channels, spatial1
-        x = torch.tanh(x)  # compute tanh activation on range [0, 1]
+        x = torch.sigmoid(x)  # compute sigmoid activation on range [0, 1]
         if x.shape[0] != self.num_nodes:
             raise ValueError("Input Tensor must have number of nodes on batch dimension.")
         if (torch.max(x) > 1 or torch.min(x) < 0) and self.debug:
@@ -381,7 +383,7 @@ class FCPlasticEdges():
         combined_weight = self.weight * self.mask.view(self.num_nodes, self.num_nodes, 1, 1, 1, 1)
         # Compose plastic weights and channel map
         combined_weight = combined_weight * self.chan_map.view(self.num_nodes, self.num_nodes, 1, 1, self.channels,
-                                                           self.channels)
+                                                               self.channels)
 
         # prepare for matmul
         combined_weight_mult = torch.permute(combined_weight, (0, 2, 4, 1, 3, 5))  # u, in_s, in_c, v, out_s, out_c
@@ -408,33 +410,33 @@ class FCPlasticEdges():
 
         # reverse the channel mapping so source channels receive information about their targets
         target_activations = target_activation.reshape(self.num_nodes * self.channels,
-                                                    self.spatial, 1).transpose(0, 1)  # (_, s, nc)
+                                                       self.spatial, 1).transpose(0, 1)  # (_, s, nc)
 
         # chan_map = self.chan_map.permute((0, 2, 1, 3)).reshape(
         #     (1, self.num_nodes * self.channels, self.num_nodes * self.channels))
         #
         # # This is a fast and  numerically stable equivalent to (chan_map ^ -1) (target_activations)
-        # target_meta_activations = torch.linalg.solve(chan_map, torch.tanh(target_activations))
+        # target_meta_activations = torch.linalg.solve(chan_map, torch.sigmoid(target_activations))
         # target_meta_activations = target_meta_activations.transpose(0, 1).reshape(self.num_nodes, self.channels,
         #                                                                           self.spatial)  # v, c, s
-        target_meta_activations = torch.tanh(target_activations)
+        target_meta_activations = torch.sigmoid(target_activations)
 
         # unfold the current remapped activations
         # u, c, s
         activ_mem = self.activation_memory  # u, c, s
-        coactivation = torch.stack((activ_mem.flatten(), target_meta_activations.flatten())) # 2, mm
-        
+        coactivation = torch.stack((activ_mem.flatten(), target_meta_activations.flatten()))  # 2, mm
+
         if not self.through_time:
             weight = self.weight.detach()
         else:
             weight = self.weight
-        weight_l = torch.permute(weight, (0, 3, 2, 5, 1, 4)).reshape((self.num_nodes * self.channels * self.spatial, -1))
+        weight_l = torch.permute(weight, (0, 3, 2, 5, 1, 4)).reshape(
+            (self.num_nodes * self.channels * self.spatial, -1))
         coactivation = torch.flip(coactivation, (0,)).T @ torch.softmax(self.beta * coactivation @ weight_l, dim=0)
 
         coactivation = coactivation.view(
             (self.num_nodes, self.channels, self.spatial, self.num_nodes, self.channels, self.spatial))
         coactivation = torch.permute(coactivation, (0, 3, 2, 5, 1, 4))  # u, v, s, s, c, c
-
 
         plasticity = self.plasticity.view(self.num_nodes, self.num_nodes, 1, 1, self.channels, self.channels).clone()
         if self.debug:
@@ -477,8 +479,8 @@ class FCPlasticEdges():
 
     def clone(self, fuzzy=False):
         instance = FCPlasticEdges(self.num_nodes, self.spatial, self.channels,
-                                device=self.device, mask=self.mask, optimize_weights=self.optimize_weights,
-                                through_time=self.through_time, debug=self.debug)
+                                  device=self.device, mask=self.mask, optimize_weights=self.optimize_weights,
+                                  through_time=self.through_time, debug=self.debug)
         if fuzzy:
             s1 = float(self.init_weight.std()) * (.5 * random.random() + .1)
             s2 = float(self.chan_map.std()) * (.5 * random.random() + .1)
@@ -504,6 +506,6 @@ class FCPlasticEdges():
 
         instance.beta = torch.nn.Parameter(
             self.beta.detach().clone() + torch.normal(size=self.beta.shape,
-                                                            mean=m3,
-                                                            std=s3, device=self.device))
+                                                      mean=m3,
+                                                      std=s3, device=self.device))
         return instance
