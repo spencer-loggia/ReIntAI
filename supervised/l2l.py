@@ -8,7 +8,7 @@ from intrinsic.model import Intrinsic, FCIntrinsic
 from sklearn.metrics import roc_curve, RocCurveDisplay
 import matplotlib
 from matplotlib import pyplot as plt
-matplotlib.use('Qt5Agg')
+# matplotlib.use('Qt5Agg')
 
 import numpy as np
 import pickle
@@ -94,7 +94,7 @@ class Decoder:
             decoder = torch.empty((81, len(train_labels)), device=device) # torch.nn.Linear(in_features=9*9, out_features=len(train_labels), device=device)
             bias = torch.empty(len(train_labels), device=device)
             self.decoder = torch.nn.Parameter(torch.nn.init.xavier_normal_(decoder))
-            self.bias = torch.nn.Parameter(torch.nn.init.normal(bias) * .01)
+            self.bias = torch.nn.Parameter(torch.nn.init.normal_(bias) * .01)
         self.optim = torch.optim.Adam(params=[self.model.resistance,
                                               self.model.edge.init_weight,
                                               self.model.edge.plasticity,

@@ -1,13 +1,15 @@
 import os
 import torch
+import torchvision
 from torchvision.datasets.mnist import MNIST
+# from torchvision.datasets.FashionMNIST
 from torchvision.transforms import PILToTensor
 from supervised.l2l import Decoder
 from sklearn.metrics import roc_curve, RocCurveDisplay
 import matplotlib
 from matplotlib import pyplot as plt
 
-matplotlib.use('Qt5Agg')
+# matplotlib.use('Qt5Agg')
 plt.rcParams['svg.fonttype'] = 'none' # editable text in svgs
 import datetime
 
@@ -21,7 +23,7 @@ if __name__ == "__main__":
     OUT = "./models/l2l/"
     ITER = 8000
     # SWAP_LABELS = True
-    DEV = "cuda"
+    DEV = "cpu"
     EVAL_ITER = 10
     REST_INT = 6
     SIZE = "large"
@@ -30,9 +32,14 @@ if __name__ == "__main__":
     load = None # "/Users/loggiasr/Projects/ReIntAI/models/l2l/mnist_decoder_2024-05-16_00:51.pkl"
 
     try:
-        dataset = MNIST(root="/tmp", transform=PILToTensor())
+        MNIST_dataset = MNIST(root="/tmp", transform=PILToTensor())
     except RuntimeError:
-        dataset = MNIST(root="./tmp", download=True, transform=PILToTensor())
+        MNIST_dataset = MNIST(root="./tmp", download=True, transform=PILToTensor())
+
+    try:
+        fMNIST_dataset = torchvision.datasets.FashionMNIST(root="/tmp", transform=PILToTensor())
+    except RuntimeError:
+        fMNIST_dataset = torchvision.datasets.FashionMNIST(root="./tmp", download=True, transform=PILToTensor())
 
     if load is not None:
         with open(load, "rb") as f:
@@ -53,7 +60,7 @@ if __name__ == "__main__":
                                              decoder.bias], lr=1e-3)
     if FIT:
         # train on set of examples:
-        decoder.l2l_fit(dataset, ITER, batch_size=80, loss_mode="ce", reset_epochs=REST_INT) # , switch_order=SWAP_LABELS
+        decoder.l2l_fit(MNIST_dataset, ITER, batch_size=80, loss_mode="ce", reset_epochs=REST_INT) # , switch_order=SWAP_LABELS
         # decoder.l2l_fit(dataset, ITER, batch_size=20, loss_mode="both")
         # decoder.l2l_fit(dataset, ITER, batch_size=100, reset_epochs=REST_INT, loss_mode="l2l")
 
@@ -70,38 +77,62 @@ if __name__ == "__main__":
     loss_fig.suptitle("Gradient Training Loss")
 
     # how do we do on train set
-    decoder.forward_fit(dataset, EVAL_ITER)
-    acc, probs, labels = decoder.evaluate(dataset, EVAL_ITER)
+    decoder.forward_fit(MNIST_dataset, EVAL_ITER)
+    acc, probs, labels = decoder.evaluate(MNIST_dataset, EVAL_ITER)
     print("INSET", acc)
     RocCurveDisplay.from_predictions(labels, probs, ax=train_ax)
 
     # how do we do on train set with reversed labels
-    decoder.forward_fit(dataset, EVAL_ITER, (7, 3))
-    acc, probs, labels = decoder.evaluate(dataset, EVAL_ITER, (7, 3))
+    decoder.forward_fit(MNIST_dataset, EVAL_ITER, (7, 3))
+    acc, probs, labels = decoder.evaluate(MNIST_dataset, EVAL_ITER, (7, 3))
     print("FLIPPED L2L", acc)
     RocCurveDisplay.from_predictions(labels, probs, ax=train_ax)
 
     # how do we do on different set
-    decoder.forward_fit(dataset, EVAL_ITER, (1, 8))
-    acc, probs, labels = decoder.evaluate(dataset, EVAL_ITER, (1, 8))
+    decoder.forward_fit(MNIST_dataset, EVAL_ITER, (1, 8))
+    acc, probs, labels = decoder.evaluate(MNIST_dataset, EVAL_ITER, (1, 8))
     print("CROSS SET L2L", acc)
     RocCurveDisplay.from_predictions(labels, probs, ax=test_ax)
 
     # how do we do on different set (flipped labels)
-    decoder.forward_fit(dataset, EVAL_ITER, (8, 1))
-    acc, probs, labels = decoder.evaluate(dataset, EVAL_ITER, (8, 1))
+    decoder.forward_fit(MNIST_dataset, EVAL_ITER, (8, 1))
+    acc, probs, labels = decoder.evaluate(MNIST_dataset, EVAL_ITER, (8, 1))
     print("CROSS SET L2L", acc)
     RocCurveDisplay.from_predictions(labels, probs, ax=test_ax)
 
     # how do we do on different set
-    decoder.forward_fit(dataset, EVAL_ITER, (2, 4))
-    acc, probs, labels = decoder.evaluate(dataset, EVAL_ITER, (1, 8))
+    decoder.forward_fit(MNIST_dataset, EVAL_ITER, (2, 4))
+    acc, probs, labels = decoder.evaluate(MNIST_dataset, EVAL_ITER, (1, 8))
     print("CROSS SET L2L", acc)
     RocCurveDisplay.from_predictions(labels, probs, ax=test_ax)
 
     # how do we do on different set (flipped labels)
-    decoder.forward_fit(dataset, EVAL_ITER, (4, 2))
-    acc, probs, labels = decoder.evaluate(dataset, EVAL_ITER, (8, 1))
+    decoder.forward_fit(MNIST_dataset, EVAL_ITER, (4, 2))
+    acc, probs, labels = decoder.evaluate(MNIST_dataset, EVAL_ITER, (8, 1))
+    print("CROSS SET L2L", acc)
+    RocCurveDisplay.from_predictions(labels, probs, ax=test_ax)
+
+    # how do we do on different set
+    decoder.forward_fit(fMNIST_dataset, EVAL_ITER, (5, 9))
+    acc, probs, labels = decoder.evaluate(fMNIST_dataset, EVAL_ITER, (5, 9))
+    print("CROSS SET L2L", acc)
+    RocCurveDisplay.from_predictions(labels, probs, ax=test_ax)
+
+    # how do we do on different set (flipped labels)
+    decoder.forward_fit(fMNIST_dataset, EVAL_ITER, (9, 5))
+    acc, probs, labels = decoder.evaluate(fMNIST_dataset, EVAL_ITER, (9, 5))
+    print("CROSS SET L2L", acc)
+    RocCurveDisplay.from_predictions(labels, probs, ax=test_ax)
+
+    # how do we do on different set
+    decoder.forward_fit(fMNIST_dataset, EVAL_ITER, (5, 9))
+    acc, probs, labels = decoder.evaluate(fMNIST_dataset, EVAL_ITER, (6, 0))
+    print("CROSS SET L2L", acc)
+    RocCurveDisplay.from_predictions(labels, probs, ax=test_ax)
+
+    # how do we do on different set (flipped labels)
+    decoder.forward_fit(fMNIST_dataset, EVAL_ITER, (9, 5))
+    acc, probs, labels = decoder.evaluate(fMNIST_dataset, EVAL_ITER, (0, 6))
     print("CROSS SET L2L", acc)
     RocCurveDisplay.from_predictions(labels, probs, ax=test_ax)
 
