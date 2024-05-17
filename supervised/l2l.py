@@ -40,7 +40,7 @@ def return_from_reward(rewards, gamma):
     return returns
 
 
-def l2l_loss(logits, targets, lfxn, classes=3, power=2, window=4):
+def l2l_loss(logits, targets, lfxn, classes=3, power=2, window=6):
     """
     :param logits: (examples, classes)
     :param targets: (examples)
@@ -111,7 +111,7 @@ class Decoder:
         img = (img - img.mean()) / img.std()
         in_states = torch.zeros_like(self.model.states)
         mask = in_states.bool()
-        for i in range(3):
+        for i in range(1):
             with torch.no_grad():
                 in_states[0, 0, :] = img.detach().flatten()
                 mask[0, 0, :] = True
@@ -119,7 +119,7 @@ class Decoder:
         in_features = self.model.states[2, 0, :].flatten()
         logits = in_features @ self.decoder + self.bias # in_features.mean(dim=(1, 2)).flatten()  #
         correct = .5 * (torch.argmax(logits, dim=0) == y) - .25
-        for i in range(2):
+        for i in range(1):
             # in_states = torch.zeros_like(self.model.states)
             # mask = in_states.bool()
             in_states[1, 0, 5] = correct
@@ -147,7 +147,7 @@ class Decoder:
         l_fxn = torch.nn.CrossEntropyLoss(reduce=False)
         data = DataLoader(data, shuffle=True, batch_size=1)
         loss = torch.tensor([0.], device=self.device)
-        sched = torch.optim.lr_scheduler.StepLR(optimizer=self.optim, gamma=.1, step_size=1200)
+        sched = torch.optim.lr_scheduler.StepLR(optimizer=self.optim, gamma=.25, step_size=1000)
         for epoch in range(epochs):
             self.optim.zero_grad()
             std_model = self.instantiate()
