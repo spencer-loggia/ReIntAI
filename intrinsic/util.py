@@ -1,7 +1,6 @@
 import torch
 import numpy as np
 
-
 def conv_identity_params(in_spatial, desired_kernel, stride=1):
     """
     finds convolution parameters that will maintain the same output shape

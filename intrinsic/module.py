@@ -73,10 +73,10 @@ class PlasticEdges():
                                            self.channels, self.kernel_size,
                                            self.kernel_size)) * self.init_weight.clone()
         elif self.init_weight.shape[4] == 1:
-            expanded_weights = torch.sigmoid(
+            expanded_weights = torch.tanh(
                 torch.tile(in_weight.clone(), (1, 1, self.spatial1, self.spatial2, self.channels, self.channels, 1, 1)))
         else:
-            expanded_weights = torch.sigmoid(
+            expanded_weights = torch.tanh(
                 torch.tile(in_weight.clone(), (1, 1, self.spatial1, self.spatial2, 1, 1, 1, 1)))
         return expanded_weights
 
@@ -103,7 +103,7 @@ class PlasticEdges():
         if self.weight is None:
             self.weight = self._expand_base_weights(self.init_weight)
         x = x.to(self.device)  # nodes, channels, spatial1, spatial2
-        x = torch.sigmoid(x)  # compute sigmoid activation on range [0, 1]
+        x = torch.tanh(x)  # compute tanh activation on range [0, 1]
         if len(x.shape) != 4:
             raise ValueError("Input Tensor Must Be 4D, not shape", x.shape)
         if x.shape[0] != self.num_nodes:
@@ -185,11 +185,11 @@ class PlasticEdges():
 
         # This is a fast and  numerically stable equivalent to (chan_map ^ -1) (target_activations)
         # inv, info = torch.linalg.solve_ex(chan_map, target_activations)
-        # target_meta_activations = torch.sigmoid(inv)
+        # target_meta_activations = torch.tanh(inv)
         # target_meta_activations = target_meta_activations.transpose(0, 1).reshape(self.num_nodes, self.channels,
         #                                                                           self.spatial1,
         #                                                                           self.spatial2)  # u, c, s, s
-        target_meta_activations = torch.sigmoid(target_activation)
+        target_meta_activations = torch.tanh(target_activation)
 
         # unfold the current remapped activations
         ufld_target = self.unfolder(target_meta_activations).transpose(1,
@@ -330,9 +330,7 @@ class FCPlasticEdges():
             init_plasticity = .8
         self.plasticity = torch.nn.Parameter(
             torch.ones((num_nodes, num_nodes, channels, channels), device=device) * .8)
-        self.beta = torch.nn.Parameter(
-            torch.nn.init.xavier_normal_(torch.empty((2, num_nodes * spatial * channels),
-                                                     device=device) * init_plasticity))
+        self.beta = torch.nn.Parameter(torch.ones((1,), device=device) * .02)
         self.device = device
         self.debug = False
         self.kernel_size = None
@@ -370,7 +368,7 @@ class FCPlasticEdges():
         if self.weight is None:
             self.weight = self._expand_base_weights(self.init_weight)
         x = x.to(self.device)  # nodes, channels, spatial1
-        x = torch.sigmoid(x)  # compute sigmoid activation on range [0, 1]
+        x = torch.tanh(x)  # compute tanh activation on range [0, 1]
         if x.shape[0] != self.num_nodes:
             raise ValueError("Input Tensor must have number of nodes on batch dimension.")
         if (torch.max(x) > 1 or torch.min(x) < 0) and self.debug:
@@ -416,10 +414,10 @@ class FCPlasticEdges():
         #     (1, self.num_nodes * self.channels, self.num_nodes * self.channels))
         #
         # # This is a fast and  numerically stable equivalent to (chan_map ^ -1) (target_activations)
-        # target_meta_activations = torch.linalg.solve(chan_map, torch.sigmoid(target_activations))
+        # target_meta_activations = torch.linalg.solve(chan_map, torch.tanh(target_activations))
         # target_meta_activations = target_meta_activations.transpose(0, 1).reshape(self.num_nodes, self.channels,
         #                                                                           self.spatial)  # v, c, s
-        target_meta_activations = torch.sigmoid(target_activations)
+        target_meta_activations = torch.tanh(target_activations)
 
         # unfold the current remapped activations
         # u, c, s

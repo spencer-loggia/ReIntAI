@@ -171,7 +171,7 @@ class FCIntrinsic:
         # how much of previous state to mix into next input.
         self.kernel_size = None
         self.num_nodes = num_nodes
-        self.resistance = torch.nn.Parameter(torch.zeros((num_nodes, node_shape[1], 1), device=device))
+        self.resistance = torch.nn.Parameter(torch.zeros((num_nodes, node_shape[1], 1), device=device) + .5)
         # Initialize (n, c, s, s) state matrix using xavier method.
         states = torch.empty(size=(self.num_nodes, node_shape[1], node_shape[2]), device=device)
         self.states = torch.nn.init.xavier_normal_(states)
